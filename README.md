@@ -914,8 +914,3 @@ If you use this package in your research, please cite both the methodology paper
   year={2025}
 }
 ```
-
-## See Also
-
-- **R package**: [didhetero](https://tkhdyanagi.github.io/didhetero/) by Imai, Qin, and Yanagi — the original R implementation
-- **Related Stata packages**: [csdid](https://github.com/friosavila/csdid_stata) for unconditional ATT in staggered DiD

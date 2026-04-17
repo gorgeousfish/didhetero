@@ -30,7 +30,8 @@ driven by a continuous pre-treatment covariate.
 The estimator combines inverse probability weighting with outcome regression
 using local polynomial methods, producing nonparametric estimates of how
 treatment effects vary as a function of a continuous covariate {it:z}. Uniform
-confidence bands are constructed via a multiplier bootstrap procedure.
+confidence bands are constructed via analytical distributional approximation
+and multiplier bootstrap procedures.
 
 {pstd}
 This package implements the methods described in Imai, Qin, and Yanagi (2025)
@@ -95,8 +96,8 @@ options.
 {syntab:Inference}
 {synopt:{opt alp(#)}}significance level; default is {cmd:0.05}{p_end}
 {synopt:{opt bstrap(true|false)}}explicit bootstrap toggle; default is {cmd:true}{p_end}
-{synopt:{opt bstrap}}legacy bootstrap-on flag{p_end}
-{synopt:{opt nobootstrap}}legacy bootstrap-off flag; omission still keeps bootstrap on{p_end}
+{synopt:{opt bstrap}}legacy flag alias for {cmd:bstrap(true)}{p_end}
+{synopt:{opt nobootstrap}}legacy flag alias for {cmd:bstrap(false)}{p_end}
 {synopt:{opt biters(#)}}bootstrap iterations; default is {cmd:1000}{p_end}
 {synopt:{opt uniformall(true|false)}}explicit uniform-band toggle; default is {cmd:true}{p_end}
 {synopt:{opt nouniformall}}legacy flag alias for {cmd:uniformall(false)}{p_end}
@@ -110,7 +111,7 @@ options.
 {synopt:{opt pretrend}}include pre-treatment periods for testing{p_end}
 
 {syntab:Other}
-{synopt:{opt seed(#)}}random-number seed for reproducibility{p_end}
+{synopt:{opt seed(#)}}random-number seed for bootstrap reproducibility; default is {cmd:-1} (use current RNG state){p_end}
 {synoptline}
 
 
@@ -263,8 +264,9 @@ t = g - anticipation - 1; this reduces to event_time = -1 only when
 {dlgtab:Other}
 
 {phang}
-{opt seed(#)} sets the random-number seed before bootstrap resampling, ensuring
-reproducible results. When omitted, the current random-number state is used.
+{opt seed(#)} sets the random-number seed immediately before bootstrap
+resampling. The default {cmd:seed(-1)} leaves the current Stata RNG state
+unchanged and therefore uses the seed already active in the session.
 
 
 {marker examples}{...}
@@ -341,7 +343,7 @@ confidence bands for inference.
 {synopt:{cmd:e(anticip)}}anticipation periods (legacy alias){p_end}
 {synopt:{cmd:e(alp)}}significance level{p_end}
 {synopt:{cmd:e(bstrap)}}1 if bootstrap was performed, 0 otherwise{p_end}
-{synopt:{cmd:e(biters)}}number of bootstrap iterations{p_end}
+{synopt:{cmd:e(biters)}}effective bootstrap iterations; 0 if bootstrap is disabled{p_end}
 {synopt:{cmd:e(seed_request)}}requested bootstrap seed; {cmd:-1} means use the current RNG state if bootstrap runs{p_end}
 {synopt:{cmd:e(seed)}}effective command-level bootstrap seed; missing if bootstrap is disabled or no command-level seed was applied{p_end}
 {synopt:{cmd:e(uniformall)}}1 if joint uniform bands requested, 0 otherwise{p_end}
@@ -364,12 +366,33 @@ confidence bands for inference.
 {p2col 5 20 24 2: Matrices}{p_end}
 {synopt:{cmd:e(results)}}main results matrix with columns: g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw; rows are ordered by ascending z within each (g,t){p_end}
 {synopt:{cmd:e(Estimate)}}alias of {cmd:e(results)}{p_end}
-{synopt:{cmd:e(Estimate_b)}}vectorized point estimates{p_end}
+{synopt:{cmd:e(Estimate_b)}}vectorized point estimates used by the storable eclass shell{p_end}
+{synopt:{cmd:e(B_g_t)}}flattened influence function matrix B_{i,g,t}(z_r); used internally by {helpb aggte_gt}{p_end}
+{synopt:{cmd:e(G_g)}}group indicator matrix (n x K); G_{i,g} = 1 if unit i belongs to group g{p_end}
+{synopt:{cmd:e(mu_G_g)}}conditional mean of G at evaluation points (R x K); E[G_g | Z = z_r]{p_end}
 {synopt:{cmd:e(gteval)}}evaluated (g,t) pairs (K x 2 matrix){p_end}
 {synopt:{cmd:e(zeval)}}evaluation points for z, sorted in ascending order{p_end}
 {synopt:{cmd:e(bw)}}bandwidth per (g,t) pair{p_end}
-{synopt:{cmd:e(c_hat)}}analytical critical values per (g,t) pair{p_end}
+{synopt:{cmd:e(c_hat)}}analytical joint critical values per (g,t) pair{p_end}
 {synopt:{cmd:e(c_check)}}bootstrap critical values per (g,t) pair (if {opt bstrap}){p_end}
+{synopt:{cmd:e(catt_est)}}CATT point estimates{p_end}
+{synopt:{cmd:e(catt_se)}}CATT standard errors{p_end}
+{synopt:{cmd:e(kd0_Z)}}kernel density estimates at z{p_end}
+{synopt:{cmd:e(kd1_Z)}}kernel density derivative estimates at z{p_end}
+{synopt:{cmd:e(Z_supp)}}support of Z{p_end}
+
+{pstd}
+The following additional matrices capture the panel snapshot used by
+{helpb aggte_gt} for two-pass aggregation and are not part of the user-facing
+inference output:
+
+{synoptset 20 tabbed}{...}
+{synopt:{cmd:e(Z)}}row vector of unit-level {it:z} values used by the upstream estimation{p_end}
+{synopt:{cmd:e(dh_Y_wide)}}wide-format outcome matrix (n x T){p_end}
+{synopt:{cmd:e(dh_G_unit)}}row vector of unit-level treatment group assignments{p_end}
+{synopt:{cmd:e(dh_t_vals)}}row vector of distinct time-period values used by the upstream estimation{p_end}
+{synopt:{cmd:e(dh_gps_mat)}}stacked generalized propensity score fits by (g, unit){p_end}
+{synopt:{cmd:e(dh_or_mat)}}stacked outcome regression fits by (g, unit){p_end}
 
 
 {marker references}{...}

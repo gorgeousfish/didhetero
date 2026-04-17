@@ -5,6 +5,7 @@
 {viewerjumpto "Options" "catt_gt_graph##options"}{...}
 {viewerjumpto "Examples" "catt_gt_graph##examples"}{...}
 {viewerjumpto "Remarks" "catt_gt_graph##remarks"}{...}
+{viewerjumpto "Stored results" "catt_gt_graph##stored"}{...}
 {viewerjumpto "References" "catt_gt_graph##references"}{...}
 {viewerjumpto "Authors" "catt_gt_graph##authors"}{...}
 {viewerjumpto "Also see" "catt_gt_graph##alsosee"}{...}
@@ -143,6 +144,16 @@ Default graph style settings:
 Graph names follow the pattern {cmd:g{it:G}_t{it:T}} in CATT mode and
 {cmd:eval{it:E}} in Aggregated mode (with decimals replaced by underscores
 and negative signs replaced by {cmd:m}).
+
+
+{marker stored}{...}
+{title:Stored results}
+
+{pstd}
+{cmd:catt_gt_graph} is not an estimation command and does not post results
+to {cmd:e()}. It reads from the existing {cmd:e()} contents produced by
+{helpb catt_gt}, {helpb didhetero}, or {helpb aggte_gt} and produces
+graphs only.
 
 
 {marker references}{...}

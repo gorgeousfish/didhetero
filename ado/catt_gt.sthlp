@@ -276,7 +276,7 @@ t = g - anticipation - 1; this reduces to event_time = -1 only when
 {phang2}{cmd:. catt_gt Y, group(G) time(period) id(id) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) pretrend}{p_end}
 {phang2}{cmd:. catt_gt_graph}{p_end}
 
-{pstd}Example 5: Estimate only selected {(g,t)} pairs{p_end}
+{pstd}Example 5: Estimate only selected {it:(g,t)} pairs{p_end}
 {phang2}{cmd:. catt_gt Y, group(G) time(period) id(id) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) ///}{p_end}
 {phang2}{cmd:        gteval(2 2 3 3) bwselect(manual) bw(0.30 0.45) uniformall(false)}{p_end}
 
@@ -336,7 +336,7 @@ confidence bands for inference.
 {synopt:{cmd:e(mu_G_g)}}conditional mean of G at evaluation points (R x K); E[G_g | Z = z_r]{p_end}
 {synopt:{cmd:e(gteval)}}evaluated (g,t) pairs{p_end}
 {synopt:{cmd:e(zeval)}}evaluation points for z, sorted in ascending order{p_end}
-{synopt:{cmd:e(bw)}}bandwidth vector{p_end}
+{synopt:{cmd:e(bw)}}bandwidth per (g,t) pair{p_end}
 {synopt:{cmd:e(c_hat)}}analytical joint critical values per (g,t) pair{p_end}
 {synopt:{cmd:e(c_check)}}bootstrap critical values per (g,t) pair (if {opt bstrap}){p_end}
 {synopt:{cmd:e(catt_est)}}CATT point estimates{p_end}
@@ -344,6 +344,19 @@ confidence bands for inference.
 {synopt:{cmd:e(kd0_Z)}}kernel density estimates at z{p_end}
 {synopt:{cmd:e(kd1_Z)}}kernel density derivative estimates at z{p_end}
 {synopt:{cmd:e(Z_supp)}}support of Z{p_end}
+
+{pstd}
+The following additional matrices capture the panel snapshot used by
+{helpb aggte_gt} for two-pass aggregation and are not part of the user-facing
+inference output:
+
+{synoptset 20 tabbed}{...}
+{synopt:{cmd:e(Z)}}row vector of unit-level {it:z} values used by the estimation{p_end}
+{synopt:{cmd:e(dh_Y_wide)}}wide-format outcome matrix (n x T){p_end}
+{synopt:{cmd:e(dh_G_unit)}}row vector of unit-level treatment group assignments{p_end}
+{synopt:{cmd:e(dh_t_vals)}}row vector of distinct time-period values used by the estimation{p_end}
+{synopt:{cmd:e(dh_gps_mat)}}stacked generalized propensity score fits by (g, unit){p_end}
+{synopt:{cmd:e(dh_or_mat)}}stacked outcome regression fits by (g, unit){p_end}
 
 
 {marker references}{...}

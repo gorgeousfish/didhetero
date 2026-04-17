@@ -35,10 +35,10 @@
 {synopt:{opt bw(numlist)}}manual bandwidth override; length must equal the final {cmd:eval()} count used by {cmd:aggte_gt}{p_end}
 
 {syntab:Inference}
-{synopt:{opt bstrap(string)}}{cmd:true} or {cmd:false}; enable bootstrap; default is {cmd:true}{p_end}
+{synopt:{opt bstrap(true|false)}}{cmd:true} or {cmd:false}; enable bootstrap; default is {cmd:true}{p_end}
 {synopt:{opt biters(#)}}bootstrap iterations; default is {cmd:1000}{p_end}
 {synopt:{opt seed(#)}}random-number seed for bootstrap reproducibility; default is {cmd:-1} (use current RNG state){p_end}
-{synopt:{opt uniformall(string)}}{cmd:true} or {cmd:false}; joint uniform bands; default is {cmd:true}{p_end}
+{synopt:{opt uniformall(true|false)}}{cmd:true} or {cmd:false}; joint uniform bands; default is {cmd:true}{p_end}
 {synoptline}
 
 {pstd}
@@ -121,10 +121,11 @@ aggregation step. Options are {cmd:IMSE1}, {cmd:IMSE2}, {cmd:US1}, and
 
 {phang}
 {opt bw(numlist)} specifies manual bandwidth(s), overriding automatic
-selection. Values must be positive. When {opt bwselect(manual)} is used, the
-vector whose length equals the number of final {cmd:eval()} points used by
-{cmd:aggte_gt}. This rule also applies when {cmd:eval()} is omitted and the
-command constructs multiple evaluation points automatically.
+selection. Values must be positive. When {opt bwselect(manual)} is used,
+{opt bw()} must be a positive scalar or a vector whose length equals the
+number of final {cmd:eval()} points used by {cmd:aggte_gt}. This rule also
+applies when {cmd:eval()} is omitted and the command constructs multiple
+evaluation points automatically.
 
 {p 8 12 2}When {opt uniformall(true)} is in effect, {cmd:aggte_gt} still
 collapses the per-eval bandwidths to their common minimum for inference after
@@ -134,7 +135,7 @@ points.{p_end}
 {dlgtab:Inference}
 
 {phang}
-{opt bstrap(string)} enables or disables the multiplier bootstrap.
+{opt bstrap(true|false)} enables or disables the multiplier bootstrap.
 {cmd:true} (default) or {cmd:false}.
 
 {phang}
@@ -146,8 +147,8 @@ bootstrap weights are generated for aggregation inference. The default
 {cmd:seed(-1)} leaves the current Stata RNG state unchanged.
 
 {phang}
-{opt uniformall(string)} enables or disables joint uniform confidence bands.
-{cmd:true} (default) or {cmd:false}.
+{opt uniformall(true|false)} enables or disables joint uniform confidence
+bands. {cmd:true} (default) or {cmd:false}.
 
 {p 8 12 2}If the final aggregation uses only one {cmd:eval} point, the
 effective inference problem degenerates to z-only uniform inference. In that
@@ -191,6 +192,14 @@ underlying {helpb catt_gt}/{helpb didhetero} state, use the documented
 
 {synoptset 24 tabbed}{...}
 {p2col 5 24 28 2: Scalars}{p_end}
+{synopt:{cmd:e(N)}}number of cross-sectional units{p_end}
+{synopt:{cmd:e(T)}}number of time periods{p_end}
+{synopt:{cmd:e(gbar)}}upper bound for treatment-time support; {cmd:.} encodes {cmd:+Inf} when never-treated units exist{p_end}
+{synopt:{cmd:e(gbar_isinf)}}1 if {cmd:e(gbar)} encodes {cmd:+Inf}, 0 otherwise{p_end}
+{synopt:{cmd:e(num_gteval)}}number of (g,t) pairs evaluated{p_end}
+{synopt:{cmd:e(num_zeval)}}number of z evaluation points{p_end}
+{synopt:{cmd:e(anticipation)}}anticipation periods inherited from the upstream result{p_end}
+{synopt:{cmd:e(anticip)}}anticipation periods (legacy alias){p_end}
 {synopt:{cmd:e(pretrend)}}1 if the upstream result includes pretrend periods, 0 otherwise{p_end}
 {synopt:{cmd:e(porder)}}current aggregation polynomial order{p_end}
 {synopt:{cmd:e(bstrap)}}1 if bootstrap is enabled for the current {cmd:aggte_gt} result, 0 otherwise{p_end}
@@ -213,9 +222,6 @@ underlying {helpb catt_gt}/{helpb didhetero} state, use the documented
 {synopt:{cmd:e(aggte_base_uniformall)}}upstream uniform-band flag snapshot{p_end}
 {synopt:{cmd:e(aggte_base_alp)}}upstream significance level snapshot{p_end}
 {synopt:{cmd:e(aggte_base_biters)}}upstream effective bootstrap iterations snapshot{p_end}
-{synopt:{cmd:e(aggte_base_seed_request)}}upstream requested seed snapshot{p_end}
-{synopt:{cmd:e(aggte_base_seed)}}upstream effective seed snapshot{p_end}
-{synopt:{cmd:e(gbar_isinf)}}1 indicates the current {cmd:e(gbar)} encodes {cmd:+Inf}; 0 indicates a finite upper bound{p_end}
 
 {synoptset 24 tabbed}{...}
 {p2col 5 24 28 2: Macros}{p_end}
@@ -249,6 +255,21 @@ underlying {helpb catt_gt}/{helpb didhetero} state, use the documented
 {synopt:{cmd:e(aggte_bw)}}bandwidths used{p_end}
 {synopt:{cmd:e(aggte_eval)}}evaluation points{p_end}
 {synopt:{cmd:e(aggte_zeval)}}z evaluation points{p_end}
+
+{pstd}
+The following upstream matrices produced by {helpb catt_gt}/{helpb didhetero}
+are preserved so that post-{cmd:aggte_gt} calls such as {helpb catt_gt_graph}
+can still access the underlying CATT state:
+
+{synoptset 24 tabbed}{...}
+{synopt:{cmd:e(results)}}upstream CATT results matrix (10 columns): g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw{p_end}
+{synopt:{cmd:e(gteval)}}upstream (g,t) evaluation pairs{p_end}
+{synopt:{cmd:e(zeval)}}upstream z evaluation points{p_end}
+{synopt:{cmd:e(bw)}}upstream per-(g,t) bandwidth vector{p_end}
+{synopt:{cmd:e(c_hat)}}upstream analytical critical values per (g,t) pair{p_end}
+{synopt:{cmd:e(c_check)}}upstream bootstrap critical values per (g,t) pair (only if the upstream result was bootstrapped){p_end}
+{synopt:{cmd:e(catt_est)}}upstream CATT point estimates{p_end}
+{synopt:{cmd:e(catt_se)}}upstream CATT standard errors{p_end}
 
 
 {marker references}{...}

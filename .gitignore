@@ -1,0 +1,9 @@
+# Build logs
+make.log
+*.log
+
+# macOS metadata
+.DS_Store
+
+# Stata temporary files
+*.stswp

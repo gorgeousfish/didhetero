@@ -1,0 +1,7 @@
+v 3
+d didhetero - Heterogeneous Treatment Effects in Staggered DiD
+d Xuanyu Cai, Wenli Xu
+d
+d Distribution-date: 20260412
+d
+p didhetero Heterogeneous treatment effects in staggered difference-in-differences

@@ -1,0 +1,48 @@
+d didhetero: Heterogeneous Treatment Effects in Staggered Difference-in-Differences
+d
+d Doubly robust uniform confidence bands for group-time conditional
+d average treatment effects (CATT) in the staggered difference-in-differences
+d framework of Callaway and Sant'Anna (2021), as proposed by
+d Imai, Qin, and Yanagi (2025).
+d
+d Requires: Stata 16.0 or later
+d
+d Distribution-date: 20260412
+d
+d Author: Xuanyu Cai, Wenli Xu
+d
+d Reference:
+d   Imai, S., L. Qin, and T. Yanagi. 2025.
+d   "Doubly Robust Uniform Confidence Bands for Group-Time Conditional
+d   Average Treatment Effects in Difference-in-Differences."
+d   Journal of Business & Economic Statistics, 1-13.
+d
+F ado/didhetero.ado
+F ado/didhetero.sthlp
+F ado/catt_gt.ado
+F ado/catt_gt.sthlp
+F ado/aggte_gt.ado
+F ado/aggte_gt.sthlp
+F ado/catt_gt_graph.ado
+F ado/catt_gt_graph.sthlp
+F ado/didhetero_simdata.ado
+F ado/didhetero_simdata.sthlp
+F ado/_dh_ensure_backend.ado
+F ado/_didhetero_validate.ado
+F ado/_didhetero_post_eclass.ado
+F ado/_didhetero_post_aggte_eclass.ado
+F ado/_didhetero_display.ado
+F ado/ldidhetero.mlib
+f data/simulated_data.dta
+f data/min_wage_cs.dta
+f data/seatbelt.dta
+f data/castle_doctrine.dta
+f data/divorce_sw.dta
+f examples/example_basic.do
+f examples/example_aggte.do
+f examples/example_advanced.do
+f examples/example_pretrend.do
+f examples/example_visualization.do
+f examples/example_seatbelt.do
+f examples/example_castle.do
+f examples/example_divorce.do

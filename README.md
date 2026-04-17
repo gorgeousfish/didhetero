@@ -82,17 +82,23 @@ After estimating CATT(g,t,z), the results can be aggregated into interpretable s
 net install didhetero, from("https://raw.githubusercontent.com/gorgeousfish/didhetero/main/") replace
 ```
 
-This automatically installs:
-- All commands and help files
-- Mata library (`ldidhetero.mlib`)
-- Bundled datasets (`min_wage_CS.dta`, `seatbelt.dta`, `castle_doctrine.dta`, `divorce_sw.dta`)
-- Example do-files
+This installs the commands, help files, and compiled Mata library (`ldidhetero.mlib`) into your personal Stata ado directory.
 
 ### From a local directory
 
 ```stata
 net install didhetero, from("/path/to/didhetero-stata/") replace
 ```
+
+### Download example scripts and bundled datasets
+
+Bundled datasets (`min_wage_cs.dta`, `seatbelt.dta`, `castle_doctrine.dta`, `divorce_sw.dta`, `simulated_data.dta`) and example do-files are distributed as ancillary files. Fetch them into your current working directory with:
+
+```stata
+net get didhetero
+```
+
+Run `net get` from a dedicated analysis folder; the files land in the current working directory and are available via plain `use filename.dta, clear` afterward.
 
 ### Verify Installation
 
@@ -101,17 +107,11 @@ which didhetero
 help didhetero
 ```
 
-### Download example scripts
-
-```stata
-net get didhetero
-```
-
 ## Quick Start
 
 ```stata
 * Load the bundled minimum wage dataset
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Estimate CATT at three poverty-rate values for instantaneous effects
@@ -229,7 +229,7 @@ catt_gt Y, ... z(Z) zeval(...) xformula("Z*X1")
 
 ```stata
 * Load the bundled minimum wage dataset (installed with the package)
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Required variables in your own data:
@@ -299,9 +299,9 @@ catt_gt_graph
 
 ### Minimum Wage — Callaway and Sant'Anna (2021)
 
-The bundled `min_wage_CS.dta` dataset reproduces the empirical application in Imai, Qin, and Yanagi (2025). The data contain county-level panel observations on teen employment in the United States.
+The bundled `min_wage_cs.dta` dataset reproduces the empirical application in Imai, Qin, and Yanagi (2025). The data contain county-level panel observations on teen employment in the United States.
 
-**Data structure (`min_wage_CS.dta`):**
+**Data structure (`min_wage_cs.dta`):**
 
 | Variable | Description |
 |----------|-------------|
@@ -321,7 +321,7 @@ The bundled `min_wage_CS.dta` dataset reproduces the empirical application in Im
 
 ```stata
 * Standard data loading and variable renaming used in all examples below
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 ```
 
@@ -390,7 +390,7 @@ clear all
 set more off
 
 * Load and prepare data
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Examine treatment groups and time periods
@@ -421,7 +421,7 @@ This example aggregates CATT(g,t,z) into event-study parameters that show how th
 clear all
 set more off
 
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Step 1: Estimate CATT for all required (g,t) pairs
@@ -459,7 +459,7 @@ This example demonstrates all four aggregation types on the minimum wage data, r
 clear all
 set more off
 
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Estimate CATT once with all (g,t) pairs needed by all four aggregation types.
@@ -500,7 +500,7 @@ This example tests the conditional parallel trends assumption using the pre-trea
 clear all
 set more off
 
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * The pretrend option automatically includes all pre-treatment periods t < g
@@ -530,7 +530,7 @@ This example produces multiplier-bootstrap uniform confidence bands (the `ci2` c
 clear all
 set more off
 
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 rename (first_treat year countyreal pov) (G period id Z)
 
 * Estimate with multiplier bootstrap (500 iterations for speed; use 1000 for publication)
@@ -559,7 +559,7 @@ This example substitutes the county log median income (`lmedinc`) for the povert
 clear all
 set more off
 
-use min_wage_CS.dta, clear
+use min_wage_cs.dta, clear
 
 * Use log median income as the heterogeneity-driving covariate z
 * Evaluate at the 25th, 50th, and 75th percentiles of lmedinc
@@ -669,8 +669,10 @@ use castle_doctrine.dta, clear
 summarize Y G period Z
 tab G if period == 2000
 
-* Evaluate at three log-population levels (8, 11, 14)
-local zpts "8 11 14"
+* Evaluate near the 25th/50th/75th percentiles of log state population
+* (p25 = 9.02, p50 = 10.31, p75 = 13.02); values outside the 5th–95th
+* percentile range are ill-advised given the small n=50 and tiny cohorts.
+local zpts "9 11 13"
 
 catt_gt Y, group(G) time(period) id(id) z(Z) ///
     zeval(`zpts') ///

@@ -1,5 +1,4 @@
-*! _didhetero_post_aggte_eclass.ado
-*! Internal helper: turn aggte_gt output into a coherent storable eclass object
+*! Store aggte_gt results in eclass matrices
 
 mata:
 void __dh_capture_aggte_post_state(real scalar has_c_check)

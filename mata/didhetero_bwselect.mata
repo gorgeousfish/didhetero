@@ -2,17 +2,12 @@ mata:
 
 // =============================================================================
 // didhetero_bwselect.mata
-// Bandwidth selection + density estimation wrappers
+// Bandwidth selection and density estimation routines
 //
-// Implements three bandwidth selection algorithms:
+// Implements three bandwidth selection methods:
 //   A. lpbwselect MSE-DPI  - for local polynomial regression
 //   B. kdbwselect MSE-DPI  - for kernel density estimation
 //   C. lpdensity MSE-DPI   - for density derivative estimation
-//
-// References:
-//   Calonico, Cattaneo, Farrell (2019). JSS, 91(8): 1-33.
-//   Cattaneo, Jansson, Ma (2020). JASA, 115(531): 1449-1455.
-//   Cattaneo, Jansson, Ma (2022). JSS, 101(2): 1-25.
 // =============================================================================
 
 // =====================================================================
@@ -148,8 +143,6 @@ real colvector _didhetero_ecdf(real colvector X)
 
 // =====================================================================
 // Section 2: lpbwselect MSE-DPI bandwidth for local polynomial regression
-// Pre-asymptotic MSE-DPI bandwidth selection following
-// Calonico, Cattaneo, Farrell (2019, JSS).
 //
 // Internal helper functions:
 //   _didhetero_lpbwselect_mse   - pointwise MSE-DPI bandwidth
@@ -158,9 +151,9 @@ real colvector _didhetero_ecdf(real colvector X)
 //   _didhetero_lprobust_vce     - sandwich variance estimator
 // =====================================================================
 
-// --- 2.1 _didhetero_lprobust_res: NN residuals on SORTED data ---
-// Computes nearest-neighbor residuals for vce="nn"
-// X must be sorted, dups/dupsid precomputed
+// --- 2.1 NN residuals on sorted data ---
+// Computes nearest-neighbor residuals. X must be sorted with
+// duplicate counts (dups) and duplicate IDs (dupsid) precomputed.
 real colvector _didhetero_lprobust_res(real colvector X, real colvector Y,
                                        real scalar nnmatch,
                                        real colvector dups,
@@ -201,8 +194,7 @@ real colvector _didhetero_lprobust_res(real colvector X, real colvector Y,
 
         lo = pos - lpos
         hi = min((n, pos + rpos))
-        // y.J = sum(y[ind.J]) - y[pos]
-        y_J = colsum(Y[lo..hi]) - Y[pos]
+            y_J = colsum(Y[lo..hi]) - Y[pos]
         Ji = (hi - lo + 1) - 1
         if (Ji > 0) {
             res[pos] = sqrt(Ji / (Ji + 1)) * (Y[pos] - y_J / Ji)
@@ -214,26 +206,15 @@ real colvector _didhetero_lprobust_res(real colvector X, real colvector Y,
     return(res)
 }
 
-// --- 2.2 _didhetero_lprobust_vce: sandwich variance (no cluster) ---
-// Returns crossprod(c(res) * RX) = (res .* RX)' * (res .* RX)
+// --- 2.2 Sandwich variance estimator (no clustering) ---
 real matrix _didhetero_lprobust_vce(real matrix RX, real colvector res)
 {
     return(cross(res :* RX, res :* RX))
 }
 
-// --- Trapezoidal integration on sorted grid with missing value handling ---
-// Used by IMSE1/IMSE2 bandwidth selectors (Stories 3.3/3.4)
-// 
-// Args:
-//   grid   - R x 1 sorted (ascending) evaluation points
-//   values - R x 1 function values at grid points
-//
-// Returns:
-//   scalar: approximate integral via trapezoidal rule
-//   Returns missing (.) if R < 2 or all intervals contain missing values
-//
-// Missing value handling:
-//   Skips intervals where grid[r], grid[r+1], values[r], or values[r+1] is missing
+// --- Trapezoidal integration ---
+// Computes approximate integral via trapezoidal rule on sorted grid.
+// Skips intervals containing missing values.
 real scalar _didhetero_trapz(real colvector grid, real colvector values)
 {
     real scalar R, r, result, valid_intervals, dz
@@ -258,26 +239,9 @@ real scalar _didhetero_trapz(real colvector grid, real colvector values)
     return(result)
 }
 
-// --- 2.3 _didhetero_lprobust_bw: core bandwidth computation ---
-// Implements the pre-asymptotic MSE-DPI bandwidth formula for vce="nn", no cluster
-//
-// Args:
-//   Y, X      - full data (sorted by X)
-//   c_eval    - scalar evaluation point
-//   o         - polynomial order for variance estimation
-//   nu        - derivative order for variance extraction
-//   o_B       - polynomial order for bias estimation
-//   h_V       - bandwidth for variance part
-//   h_B1      - bandwidth for bias B1 part
-//   h_B2      - bandwidth for bias B2 part
-//   scale     - bwregul parameter (0 or 1)
-//   nnmatch   - number of NN matches
-//   kernel    - "epa" or "gau"
-//   dups      - duplicate counts (precomputed on sorted X)
-//   dupsid    - duplicate IDs (precomputed on sorted X)
-//
-// Returns: bw (scalar bandwidth), or . on failure
-// Also returns V, B1, B2, R via pointer arguments
+// --- 2.3 Core bandwidth computation ---
+// Implements pre-asymptotic MSE-DPI bandwidth formula for nearest-neighbor
+// variance estimation without clustering.
 real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
                                     real scalar c_eval,
                                     real scalar o, real scalar nu,
@@ -325,13 +289,13 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
     eX = select(X, ind_V)
     eW = select(w, ind_V)
 
-    // Unscaled basis: R_V[,j] = (eX - c)^(j-1)
+    // Polynomial basis matrix
     R_V = J(n_V, o + 1, .)
     for (j = 1; j <= o + 1; j++) {
         R_V[., j] = (eX :- c_eval) :^ (j - 1)
     }
 
-    // invG_V = (R_V' * diag(eW) * R_V)^{-1} via Cholesky decomposition
+    // Inverse Gram matrix via Cholesky decomposition
     invG_V = cholinv(cross(R_V :* sqrt(eW), R_V :* sqrt(eW)))
     if (hasmissing(invG_V)) {
         V_out = .; B1_out = .; B2_out = .; R_out = 0
@@ -343,29 +307,23 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
     dupsid_V = select(dupsid, ind_V)
     res_V = _didhetero_lprobust_res(eX, eY, nnmatch, dups_V, dupsid_V)
 
-    // V_V = (invG_V * crossprod(res_V .* RW) * invG_V)[nu+1, nu+1]
+    // Variance component
     RW = R_V :* eW
     vce_mat = _didhetero_lprobust_vce(RW, res_V)
     V_V = (invG_V * vce_mat * invG_V)[nu + 1, nu + 1]
 
-    // ===== BIAS CONSTANTS (uses h_V data) =====
-    // Hp[j] = h_V^(j-1)
     Hp = J(o + 1, 1, .)
     for (j = 1; j <= o + 1; j++) {
         Hp[j] = h_V^(j - 1)
     }
 
-    // v1 = R_V' * diag(eW) * ((eX-c)/h_V)^(o+1)
     v1 = cross(R_V, eW :* (((eX :- c_eval) / h_V) :^ (o + 1)))
-    // v2 = R_V' * diag(eW) * ((eX-c)/h_V)^(o+2)
     v2 = cross(R_V, eW :* (((eX :- c_eval) / h_V) :^ (o + 2)))
 
-    // BConst1 = (Hp .* (invG_V * v1))[nu+1]
     BConst1 = (Hp :* (invG_V * v1))[nu + 1]
-    // BConst2 = (Hp .* (invG_V * v2))[nu+1]
     BConst2 = (Hp :* (invG_V * v2))[nu + 1]
 
-    // ===== BIAS B1 (uses h_B1, kernel weights NOT divided by h) =====
+    // Bias component B1
     w_B = didhetero_kernel_eval((X :- c_eval) / h_B1, kernel)
     ind_B = (w_B :> 0)
     n_B = sum(ind_B)
@@ -389,7 +347,7 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
     }
     beta_B1 = invG_B1 * cross(R_B1, eW_B :* eY_B)
 
-    // BWreg computation (if scale > 0)
+    // Regularization (if scale > 0)
     BWreg = 0
     if (scale > 0) {
         dups_B = select(dups, ind_B)
@@ -401,7 +359,7 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
         BWreg = 3 * BConst1^2 * V_B
     }
 
-    // ===== BIAS B2 (uses h_B2, kernel weights NOT divided by h) =====
+    // Bias component B2
     w_B = didhetero_kernel_eval((X :- c_eval) / h_B2, kernel)
     ind_B = (w_B :> 0)
     n_B = sum(ind_B)
@@ -425,7 +383,6 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
     }
     beta_B2 = invG_B2 * cross(R_B2, eW_B :* eY_B)
 
-    // ===== ASSEMBLE =====
     B1_out = BConst1 * beta_B1[o + 2]
     B2_out = BConst2 * beta_B2[o + 3]
     V_final = N * h_V^(2 * nu + 1) * V_V
@@ -446,26 +403,9 @@ real scalar _didhetero_lprobust_bw(real colvector Y, real colvector X,
 }
 
 
-// --- 2.4a _didhetero_bw_pilot_estimates: shared pre-asymptotic pilot ---
-// Computes pre-asymptotic bias^2 and variance terms at each evaluation
-// point using the 4-stage pilot bandwidth cascade.
-//
-// Both MSE-DPI and IMSE-DPI share this function:
-//   - MSE-DPI applies the pointwise formula to B_hat_sq, V_hat
-//   - IMSE-DPI integrates B_hat_sq, V_hat then applies the global formula
-//
-// Stages 1-3 compute pilot bandwidths,
-// Stage 4 extracts the final V and B1 components.
-//
-// Args:
-//   Y        - n x 1 dependent variable
-//   X        - n x 1 independent variable
-//   eval     - R x 1 evaluation points
-//   p        - polynomial order
-//   deriv    - derivative order (nu)
-//   kernel   - "epa" or "gau"
-//   B_hat_sq - output: R x 1, pre-asymptotic B_hat_1^2(z_r)
-//   V_hat    - output: R x 1, pre-asymptotic V_hat(z_r)
+// --- 2.4a Pre-asymptotic pilot estimates ---
+// Computes pre-asymptotic bias and variance terms at each evaluation point
+// using a 4-stage pilot bandwidth cascade. Used by both MSE-DPI and IMSE-DPI.
 void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
                                     real colvector eval, real scalar p,
                                     real scalar deriv,
@@ -486,17 +426,17 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
     R_eval = rows(eval)
     q = p + 1
 
-    // --- Initialize outputs ---
+    // Initialize outputs
     B_hat_sq = J(R_eval, 1, .)
     V_hat    = J(R_eval, 1, .)
 
-    // --- Pilot bandwidth constant ---
+    // Pilot bandwidth constant
     if (kernel == "epa") C_c = 2.34
     else if (kernel == "gau") C_c = 1.06
     else C_c = 2.34
 
     x_sd = sqrt(variance(X))
-    // IQR: Hyndman & Fan type-7 quantile interpolation
+    // Interquartile range
     {
         real colvector X_sorted
         real scalar q25, q75, idx_r, j_r, h_r
@@ -518,12 +458,12 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
     x_max = max(X)
     range_X = x_max - x_min
 
-    // --- Sort data by X for NN residuals ---
+    // Sort data
     sort_idx = order(X, 1)
     X_s = X[sort_idx]
     Y_s = Y[sort_idx]
 
-    // --- Compute dups and dupsid on sorted data ---
+    // Compute duplicate counts and IDs
     dups = J(N, 1, 0)
     dupsid = J(N, 1, 0)
     for (j = 1; j <= N; j++) {
@@ -540,20 +480,20 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
         }
     }
 
-    // --- Per eval point: 4-stage cascade ---
+    // Four-stage pilot bandwidth cascade per evaluation point
     for (r_idx = 1; r_idx <= R_eval; r_idx++) {
         real scalar c_eval_r
 
         c_eval_r = eval[r_idx]
 
-        // bw.max = max(|eval - x.min|, |eval - x.max|)
+        // Maximum bandwidth
         bw_max_r = max((abs(c_eval_r - x_min), abs(c_eval_r - x_max)))
 
-        // c.bw = C.c * min(sd(x), IQR/1.349) * N^(-1/5)
+        // Pilot bandwidth constant
         c_bw = C_c * min((x_sd, x_iq / 1.349)) * N^(-1 / 5)
         c_bw = min((c_bw, bw_max_r))
 
-        // bwcheck: bw.min = sort(|x - eval|)[21]
+        // Minimum bandwidth (bwcheck)
         {
             real colvector abs_dist
             abs_dist = sort(abs(X_s :- c_eval_r), 1)
@@ -566,7 +506,7 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
         }
         c_bw = max((c_bw, bw_min))
 
-        // === Stage 1: bw.mp2 ===
+        // Stage 1: Pilot bandwidth for bias estimation
         bw_mp2 = _didhetero_lprobust_bw(Y_s, X_s, c_eval_r,
                     q + 1, q + 1, q + 2,
                     c_bw, range_X, range_X, 0,
@@ -576,7 +516,7 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
         bw_mp2 = min((bw_mp2, bw_max_r))
         bw_mp2 = max((bw_mp2, bw_min))
 
-        // === Stage 2: bw.mp3 ===
+        // Stage 2: Pilot bandwidth for higher-order bias
         bw_mp3 = _didhetero_lprobust_bw(Y_s, X_s, c_eval_r,
                     q + 2, q + 2, q + 3,
                     c_bw, range_X, range_X, 0,
@@ -586,7 +526,7 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
         bw_mp3 = min((bw_mp3, bw_max_r))
         bw_mp3 = max((bw_mp3, bw_min))
 
-        // === Stage 3: b.mse.dpi ===
+        // Stage 3: Pilot bandwidth for MSE
         b_mse_dpi = _didhetero_lprobust_bw(Y_s, X_s, c_eval_r,
                     q, p + 1, q + 1,
                     c_bw, bw_mp2, bw_mp3, 1,
@@ -596,14 +536,14 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
         b_mse_dpi = min((b_mse_dpi, bw_max_r))
         b_mse_dpi = max((b_mse_dpi, bw_min))
 
-        // === Stage 4: extract pre-asymptotic quantities ===
+        // Stage 4: Extract variance and bias estimates
         h_val = _didhetero_lprobust_bw(Y_s, X_s, c_eval_r,
                     p, deriv, q,
                     c_bw, b_mse_dpi, bw_mp2, 1,
                     3, kernel, dups, dupsid,
                     V_tmp, B1_tmp, B2_tmp, R_tmp)
 
-        // Store pre-asymptotic terms (missing if cascade failed)
+        // Store estimates
         if (V_tmp != . & B1_tmp != .) {
             B_hat_sq[r_idx] = B1_tmp^2
             V_hat[r_idx]    = V_tmp
@@ -612,15 +552,9 @@ void _didhetero_bw_pilot_estimates(real colvector Y, real colvector X,
 }
 
 
-// --- 2.4a2 _didhetero_bw_pilot_even: extended pilot for even case ---
-// Same 4-stage cascade as _didhetero_bw_pilot_estimates, but also returns
-// the raw B1, B2, and h_mse_dpi per point needed for the even branch of
-// lpbwselect.imse.dpi.
-//
-// For even case (p-deriv)%%2==0, the IMSE-DPI formula uses:
-//   V_h = V  (raw, no rV scaling)
-//   B_h = (B1 + h_mse_dpi * B2)^2
-// So we need B1, B2, h_mse per point.
+// --- 2.4a2 Extended pilot estimates for even case ---
+// Computes pre-asymptotic quantities for cases where (p - deriv) is even.
+// Returns raw variance, bias components, and optimal bandwidth per point.
 void _didhetero_bw_pilot_even(real colvector Y, real colvector X,
                                          real colvector eval, real scalar p,
                                          real scalar deriv,
@@ -931,9 +865,9 @@ real scalar _didhetero_bw_imse_optimize(real scalar mean_Vh,
 }
 
 
-// --- 2.4b _dh_lpbw_mse_details: exact pointwise MSE-DPI details ---
-// Computes the pointwise MSE-DPI bandwidth for one eval point.
-// Returns the pointwise h_mse_dpi and the V/B objects that IMSE-DPI averages.
+// --- 2.4b Pointwise MSE-DPI details ---
+// Computes pointwise MSE-DPI bandwidth and variance/bias components
+// for a single evaluation point.
 void _dh_lpbw_mse_details(real colvector Y, real colvector X,
                           real scalar eval_pt, real scalar p,
                           real scalar deriv,
@@ -956,13 +890,13 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     q = p + 1
     even = (mod(p - deriv, 2) == 0)
 
-    // --- Pilot bandwidth constant ---
+    // Pilot bandwidth constant
     if (kernel == "epa") C_c = 2.34
     else if (kernel == "gau") C_c = 1.06
     else C_c = 2.34
 
     x_sd = sqrt(variance(X))
-    // IQR: Hyndman & Fan type-7 quantile interpolation
+    // Interquartile range
     {
         real colvector X_sorted
         real scalar q25, q75, idx_r, j_r, h_r
@@ -984,12 +918,12 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     x_max = max(X)
     range_X = x_max - x_min
 
-    // --- Sort data by X for NN residuals ---
+    // Sort data
     sort_idx = order(X, 1)
     X_s = X[sort_idx]
     Y_s = Y[sort_idx]
 
-    // --- Compute dups and dupsid on sorted data ---
+    // Compute duplicate counts and IDs
     dups = J(N, 1, 0)
     dupsid = J(N, 1, 0)
     for (j = 1; j <= N; j++) {
@@ -1010,14 +944,14 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     V_h = .
     B_h = .
 
-    // bw.max = max(|eval - x.min|, |eval - x.max|)
+    // Maximum bandwidth at evaluation point
     bw_max_r = max((abs(eval_pt - x_min), abs(eval_pt - x_max)))
 
-    // c.bw = C.c * min(sd(x), IQR/1.349) * N^(-1/5)
+    // Pilot bandwidth constant
     c_bw = C_c * min((x_sd, x_iq / 1.349)) * N^(-1 / 5)
     c_bw = min((c_bw, bw_max_r))
 
-    // bwcheck: bw.min = sort(|x - eval|)[21]
+    // Minimum bandwidth (bwcheck)
     {
         real colvector abs_dist
         abs_dist = sort(abs(X_s :- eval_pt), 1)
@@ -1026,7 +960,7 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     }
     c_bw = max((c_bw, bw_min))
 
-    // === Stage 1: bw.mp2 ===
+    // Stage 1
     bw_mp2 = _didhetero_lprobust_bw(Y_s, X_s, eval_pt,
                 q + 1, q + 1, q + 2,
                 c_bw, range_X, range_X, 0,
@@ -1040,7 +974,7 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     bw_mp2 = min((bw_mp2, bw_max_r))
     bw_mp2 = max((bw_mp2, bw_min))
 
-    // === Stage 2: bw.mp3 ===
+    // Stage 2
     bw_mp3 = _didhetero_lprobust_bw(Y_s, X_s, eval_pt,
                 q + 2, q + 2, q + 3,
                 c_bw, range_X, range_X, 0,
@@ -1054,7 +988,7 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     bw_mp3 = min((bw_mp3, bw_max_r))
     bw_mp3 = max((bw_mp3, bw_min))
 
-    // === Stage 3: b.mse.dpi ===
+    // Stage 3
     b_mse_dpi = _didhetero_lprobust_bw(Y_s, X_s, eval_pt,
                 q, p + 1, q + 1,
                 c_bw, bw_mp2, bw_mp3, 1,
@@ -1068,7 +1002,7 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
     b_mse_dpi = min((b_mse_dpi, bw_max_r))
     b_mse_dpi = max((b_mse_dpi, bw_min))
 
-    // === Stage 4: h_mse_dpi (final bandwidth h) ===
+    // Stage 4
     h_val = _didhetero_lprobust_bw(Y_s, X_s, eval_pt,
                 p, deriv, q,
                 c_bw, b_mse_dpi, bw_mp2, 1,
@@ -1097,8 +1031,7 @@ void _dh_lpbw_mse_details(real colvector Y, real colvector X,
 }
 
 
-// --- 2.4c _didhetero_lpbwselect_mse: main MSE-DPI bandwidth selector ---
-// Computes pointwise MSE-DPI bandwidth for each evaluation point.
+// --- 2.4c Pointwise MSE-DPI bandwidth selector ---
 real colvector _didhetero_lpbwselect_mse(real colvector Y, real colvector X,
                                          real colvector eval, real scalar p,
                                          real scalar deriv,
@@ -1120,23 +1053,11 @@ real colvector _didhetero_lpbwselect_mse(real colvector Y, real colvector X,
 }
 
 
-// --- 2.5 _didhetero_lpbwselect_imse: IMSE-DPI common bandwidth selector ---
-// Returns a SCALAR bandwidth that minimizes integrated MSE over eval grid.
-// Implements IMSE-DPI bandwidth selection (both even and odd branches)
-// following Calonico, Cattaneo, Farrell (2019, JSS).
+// --- 2.5 IMSE-DPI common bandwidth selector ---
+// Returns scalar bandwidth minimizing integrated MSE over evaluation grid.
 //
-// Algorithm (IMSE-DPI bandwidth selection):
-//   even = mod(p - deriv, 2) == 0
-//
-//   ODD branch (even==FALSE):
-//     V_h = rV * V,  B_h = rB * B1^2
-//     h = (mean(V_h) / (N * mean(B_h)))^(1/(2p+3))
-//
-//   EVEN branch (even==TRUE, interior==FALSE):
-//     V_h = V (raw),  B_h = (B1 + h_mse*B2)^2
-//     h = optimize(|H^(2p+2-2*deriv)*mean(B_h) + mean(V_h)/(N*H^(1+2*deriv))|)
-//
-//   Note: bwcheck/bwregul are NOT applied to the final IMSE result.
+// For odd (p - deriv): V_h = rV * V, B_h = rB * B1^2, closed-form solution.
+// For even (p - deriv): numerical optimization of IMSE objective.
 real scalar _didhetero_lpbwselect_imse(real colvector Y, real colvector X,
                                        real colvector eval, real scalar p,
                                        real scalar deriv,
@@ -1160,8 +1081,7 @@ real scalar _didhetero_lpbwselect_imse(real colvector Y, real colvector X,
         return(.)
     }
 
-    // IMSE-DPI averages pilot quantities over a 30-point equally
-    // spaced grid on [min(X), max(X)], ignoring the supplied eval.
+    // IMSE-DPI uses 30-point equispaced grid
     eval_grid = rangen(min(X), max(X), 30)
     R_eval = rows(eval_grid)
 
@@ -1225,8 +1145,6 @@ real scalar _didhetero_lpbwselect_imse(real colvector Y, real colvector X,
 
 // =====================================================================
 // Section 3: kdbwselect MSE-DPI bandwidth for kernel density estimation
-// ROT-based bandwidth for kernel density estimation (v=0, p=2)
-// Reference: Calonico, Cattaneo, Farrell (2019, JSS)
 // =====================================================================
 
 real colvector _didhetero_kdbwselect_mse(real colvector X,
@@ -1312,8 +1230,7 @@ real colvector _didhetero_kdbwselect_mse(real colvector X,
     return(h_mse)
 }
 
-// didhetero_kdrobust: density estimation using kdbwselect + simple KDE
-// Implements kernel density estimation with MSE-DPI bandwidth selection.
+// Kernel density estimation with MSE-DPI bandwidth selection
 real colvector didhetero_kdrobust(real colvector X, real colvector eval,
                                   string scalar kernel)
 {
@@ -1325,13 +1242,12 @@ real colvector didhetero_kdrobust(real colvector X, real colvector eval,
 
 // =====================================================================
 // Section 4: Local polynomial density derivative estimation
-// Implements bw_IROT, bw_MSE, and density estimation functions
-// Reference: Cattaneo, Jansson, Ma (2022, JSS)
+// Implements bw_IROT, bw_MSE, and density estimation functions.
 // =====================================================================
 
-// --- 4.1 Analytical kernel matrix generators ---
+// --- 4.1 Kernel matrix generators ---
 
-// Sgenerate: S[i,j] = integral(u^(i+j-2) * K(u), -1, 1)
+// S matrix: kernel moment integrals
 real matrix _didhetero_lpdensity_Sgenerate(real scalar p, string scalar kernel)
 {
     real matrix S
@@ -1351,7 +1267,7 @@ real matrix _didhetero_lpdensity_Sgenerate(real scalar p, string scalar kernel)
     return(S)
 }
 
-// Tgenerate: T[i,j] = integral(u^(i+j-2) * K(u)^2, -1, 1)
+// T matrix: squared kernel moment integrals
 real matrix _didhetero_lpdensity_Tgenerate(real scalar p, string scalar kernel)
 {
     real matrix T
@@ -1371,7 +1287,7 @@ real matrix _didhetero_lpdensity_Tgenerate(real scalar p, string scalar kernel)
     return(T)
 }
 
-// Cgenerate: C[i] = integral(u^(i+k-1) * K(u), -1, 1)
+// C vector: bias term kernel integrals
 real colvector _didhetero_lpdensity_Cgenerate(real scalar k, real scalar p,
                                                string scalar kernel)
 {
@@ -1390,10 +1306,7 @@ real colvector _didhetero_lpdensity_Cgenerate(real scalar k, real scalar p,
     return(C)
 }
 
-// Ggenerate: G[i,j] = double integral for influence function variance
-// G[i,j] = int_-1^1 int_-1^y x^i * y^(j-1) * K(x)*K(y) dx dy
-//         + int_-1^1 int_y^1 x^(i-1) * y^j * K(x)*K(y) dx dy
-// Uses midpoint rule with M points per dimension
+// G matrix: influence function variance (double integral via midpoint rule)
 real matrix _didhetero_lpdensity_Ggenerate(real scalar p, string scalar kernel)
 {
     real matrix G
@@ -1457,10 +1370,6 @@ real matrix _didhetero_lpdensity_Ggenerate(real scalar p, string scalar kernel)
 
 
 // --- 4.2 Normal PDF derivative via Hermite polynomials ---
-// Computes d^v/dx^v [phi(x; mu, sd)] where phi is the normal PDF
-// Uses the relation: phi^(v)(x) = (-1)^v / sd^v * He_v(z) * phi(z) / sd
-// where z = (x-mu)/sd and He_v is the probabilist's Hermite polynomial
-// He_0(z) = 1, He_1(z) = z, He_n(z) = z*He_{n-1}(z) - (n-1)*He_{n-2}(z)
 real scalar _didhetero_normal_pdf_deriv(real scalar x, real scalar mu,
                                         real scalar sd_val, real scalar v)
 {
@@ -1484,9 +1393,8 @@ real scalar _didhetero_normal_pdf_deriv(real scalar x, real scalar mu,
     return((-1)^v / sd_val^v * He_curr * phi_z)
 }
 
-// --- 4.3 bw_IROT: Integrated Rule-of-Thumb bandwidth ---
-// Returns a SCALAR bandwidth (integrated over grid points)
-// Following Cattaneo, Jansson, Ma (2022, JSS)
+// --- 4.3 Integrated Rule-of-Thumb bandwidth ---
+// Returns scalar bandwidth integrated over grid points.
 real scalar _didhetero_lpdensity_bw_IROT(real colvector data,
                                           real colvector grid,
                                           real scalar p, real scalar v,
@@ -1517,16 +1425,14 @@ real scalar _didhetero_lpdensity_bw_IROT(real colvector data,
     dataUnique = uniqrows(data_local)
     nUnique = rows(dataUnique)
 
-    // Standardize
+    // Standardize data
     center_temp = mean(data_local)
     scale_temp = sqrt(variance(data_local))
     data_local = (data_local :- center_temp) / scale_temp
     dataUnique = (dataUnique :- center_temp) / scale_temp
     grid_local = (grid_local :- center_temp) / scale_temp
 
-    // Normal reference model.
-    // The IROT rule computes the post-standardization scale with denominator n,
-    // not n-1, so use the empirical second moment rather than variance().
+    // Normal reference model
     mean_hat = mean(data_local)
     sd_hat = sqrt(mean((data_local :- mean_hat) :^ 2))
 
@@ -1639,7 +1545,7 @@ real scalar _didhetero_lpdensity_bw_IROT(real colvector data,
 
     h_opt = (a_lo + a_hi) / 2
 
-    // Handle NA
+    // Handle missing values
     if (h_opt == . | h_opt <= 0) {
         h_opt = 0
         for (j = 1; j <= ng; j++) {
@@ -1679,9 +1585,8 @@ real scalar _didhetero_lpdensity_bw_IROT(real colvector data,
 }
 
 
-// --- 4.4 bw_MSE: MSE-optimal pointwise bandwidth ---
-// Returns ng x 1 vector of bandwidths
-// Following Cattaneo, Jansson, Ma (2022, JSS)
+// --- 4.4 MSE-optimal pointwise bandwidth ---
+// Returns ng x 1 vector of bandwidths.
 real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
                                             real colvector grid_in,
                                             real scalar p, real scalar v,
@@ -1715,17 +1620,17 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
     real scalar n_eff
     real matrix G_full
 
-    // --- Sort data ---
+    // Sort data
     data = sort(data_in, 1)
     grid = grid_in  // don't sort grid, keep original order
     n = rows(data)
     ng = rows(grid)
 
-    // --- Unique values with frequencies ---
+    // Unique values with frequencies
     dataUnique = uniqrows(data)
     nUnique = rows(dataUnique)
 
-    // Build frequency and index vectors for mass points
+    // Frequency and index vectors for tied values
     freqUnique = J(nUnique, 1, 0)
     indexUnique_vec = J(nUnique, 1, 0)
     k = 1
@@ -1744,17 +1649,15 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
         }
     }
 
-    // --- Standardize ---
+    // Standardize data
     center_temp = mean(data)
     scale_temp = sqrt(variance(data))
     data = (data :- center_temp) / scale_temp
     dataUnique = (dataUnique :- center_temp) / scale_temp
     grid = (grid :- center_temp) / scale_temp
 
-    // --- ECDF with mass points ---
-    // Fn = cumulative proportion, with ties getting the same value
+    // Empirical CDF (with ties receiving the same cumulative proportion)
     Fn = (1::n) / n
-    // Apply mass point correction: all tied values get the max rank proportion
     for (k = 1; k <= nUnique; k++) {
         if (freqUnique[k] > 1) {
             temp_val = Fn[indexUnique_vec[k]]
@@ -1771,14 +1674,10 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
         }
     }
 
-    // --- IROT pilot bandwidths ---
+    // IROT pilot bandwidths
     nLocalMin_h1 = 20 + 2 + 1
     nUniqueMin_h1 = 20 + 2 + 1
     h1 = _didhetero_lpdensity_bw_IROT(data, grid, 2, 1, kernel, nLocalMin_h1, nUniqueMin_h1)
-    // h1 is already in standardized scale (bw_IROT standardizes internally then rescales).
-    // bw_MSE standardizes data first, then passes the standardized data to bw_IROT
-    // which standardizes AGAIN internally. This double-standardization is intentional
-    // and matches the density estimation convention.
 
     nLocalMin_hp1 = 20 + p + 2 + 1
     nUniqueMin_hp1 = 20 + p + 2 + 1
@@ -1788,7 +1687,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
     nUniqueMin_hp2 = 20 + p + 3 + 1
     hp2 = _didhetero_lpdensity_bw_IROT(data, grid, p + 3, p + 2, kernel, nLocalMin_hp2, nUniqueMin_hp2)
 
-    // --- Per grid point: estimate dgp and constants ---
+    // Per grid point: estimate data generating process and constants
     dgp_hat = J(ng, 2, .)
     const_hat = J(ng, 3, .)
     h = J(ng, 1, .)
@@ -1797,7 +1696,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
 
     for (j = 1; j <= ng; j++) {
 
-        // === Estimate F_{p+2} via scaled-basis CDF-LPR with hp2 ===
+        // Estimate CDF derivative F_{p+2}
         index_temp_vec = J(n, 1, 0)
         n_eff = 0
         for (i_idx = 1; i_idx <= n; i_idx++) {
@@ -1819,22 +1718,21 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
             }
         }
 
-        // Scaled polynomial basis: columns 0..(p+3)
+        // Polynomial basis
         Xh_p_temp = J(n_eff, p + 4, .)
         for (k = 0; k <= p + 3; k++) {
             Xh_p_temp[., k + 1] = Xh_temp :^ k
         }
 
-        // Kernel weights / hp2
+        // Kernel weights
         Kh_temp = 0.75 * (1 :- Xh_temp :^ 2) / hp2
 
-        // WLS: beta = (X'KX)^{-1} X'KY
-        // Result: beta[p+3] / hp2^(p+2) = F_{p+2} estimate
+        // Weighted least squares
         beta_temp = cholinv(cross(Xh_p_temp, Kh_temp, Xh_p_temp)) * cross(Xh_p_temp, Kh_temp, Y_temp)
         if (hasmissing(beta_temp)) continue
         dgp_hat[j, 2] = beta_temp[p + 3] / hp2^(p + 2)
 
-        // === Estimate F_{p+1} via scaled-basis CDF-LPR with hp1 ===
+        // Estimate CDF derivative F_{p+1}
         index_temp_vec = J(n, 1, 0)
         n_eff = 0
         for (i_idx = 1; i_idx <= n; i_idx++) {
@@ -1867,7 +1765,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
         if (hasmissing(beta_temp)) continue
         dgp_hat[j, 1] = beta_temp[p + 2] / hp1^(p + 1)
 
-        // === Pre-asymptotic matrices with h1 ===
+        // Pre-asymptotic matrices
         index_temp_vec = J(n, 1, 0)
         n_eff = 0
         for (i_idx = 1; i_idx <= n; i_idx++) {
@@ -1912,8 +1810,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
 
         // G_hat via influence function approach (for v > 0)
         if (v > 0) {
-            // Use full sample, influence function approach with mass points
-            // Recompute Xh and Kh for ALL unique data points
+            // Influence function approach with tied values
             Xh_temp = (dataUnique :- grid[j]) / h1
             Xh_p_temp = J(nUnique, p + 1, .)
             for (k = 0; k <= p; k++) {
@@ -1980,7 +1877,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
             G_hat = cross(Xh_p_temp, Kh_temp :^ 2, Xh_p_temp) / n
         }
 
-        // === Assemble constants ===
+        // Assemble bias and variance constants
         const_hat[j, 1] = factorial(v) * (S_hat_inv * C_p_hat)[v + 1]
         const_hat[j, 2] = factorial(v) * (S_hat_inv * C_p1_hat)[v + 1]
 
@@ -1992,7 +1889,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
             const_hat[j, 3] = factorial(v) * sqrt(abs((S_hat_inv * G_hat * S_hat_inv)[v + 1, v + 1] / (0.5 * n^2) * h1 * temp_val * (1 - temp_val)))
         }
 
-        // === Golden section search for optimal h[j] ===
+        // Golden section search for optimal bandwidth
         a_lo = 1e-10
         a_hi = range_data
 
@@ -2022,16 +1919,16 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
         h[j] = (a_lo + a_hi) / 2
     }
 
-    // --- Post-processing: regularize ---
+    // Post-processing regularization
     for (j = 1; j <= ng; j++) {
         sorted_abs = sort(abs(data :- grid[j]), 1)
         if (h[j] == .) {
             h[j] = sorted_abs[min((n, max((20 + p + 1, 20 + p + 1))))]
         }
-        // nLocalMin regularization
+        // Minimum local observations regularization
         bw_min_local = sorted_abs[min((n, 20 + p + 1))]
         if (h[j] < bw_min_local) h[j] = bw_min_local
-        // nUniqueMin regularization
+        // Minimum unique observations regularization
         sorted_abs_u = sort(abs(dataUnique :- grid[j]), 1)
         bw_min_unique = sorted_abs_u[min((nUnique, 20 + p + 1))]
         if (h[j] < bw_min_unique) h[j] = bw_min_unique
@@ -2040,7 +1937,7 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
         if (h[j] > h_max_j) h[j] = h_max_j
     }
 
-    // --- Rescale back ---
+    // Rescale to original units
     h = h * scale_temp
 
     return(h)
@@ -2049,18 +1946,9 @@ real colvector _didhetero_lpdensity_bw_MSE(real colvector data_in,
 
 // =====================================================================
 // Section 5: IMSE1 / IMSE2 / US1 bandwidth selection
-// (didhetero paper-specific algorithms)
-//
-// Reference: Imai, Qin, Yanagi (2025), Sections 4.2.5-4.2.6
 // =====================================================================
 
 // --- 5.1 Kernel integral constants ---
-// Returns the 7 kernel integral constants used by IMSE1/IMSE2/US1:
-//   I_{l,K^m} = integral(u^l * K^m(u) du)
-// for (l,m) in {(2,1),(4,1),(6,1),(0,2),(2,2),(4,2),(6,2)}
-//
-// These are the SAME values computed by _didhetero_kernel_int but
-// bundled for convenience and validated against the paper.
 void _didhetero_kernel_constants(string scalar kernel,
                                   real scalar I_2_K1,
                                   real scalar I_4_K1,
@@ -2094,24 +1982,10 @@ void _didhetero_kernel_constants(string scalar kernel,
 }
 
 
-// --- 5.2 Shared variance estimation for IMSE1/IMSE2/US1 ---
-// Estimates the conditional variance term mathcal_V at each evaluation point.
-//
-// Five-step process per evaluation point r:
-//   1. IMSE-DPI common bandwidth (p=1, deriv=0) on 100-point support grid
-//   2. LLR fitted values at all observation points (eval=Z)
-//   3. Residuals: U_hat = y_r - mu_hat_0
-//   4. MSE-DPI bandwidth for sigma^2 = U_hat^2 (p=1, deriv=0)
-//   5. LPR estimate of sigma^2 at zeval[r], then V[r] = const_V * sigma^2 / f(z_r)
-//
-// Args:
-//   B_g_t    - n x R matrix, each column is the influence function
-//   Z        - n x 1 covariate vector
-//   zeval    - R x 1 sorted evaluation points
-//   kd0_Z    - R x 1 kernel density estimates at zeval
-//   const_V  - scalar variance constant (C_V1 for IMSE1, C_V2 for IMSE2)
-//   kernel   - "epa" or "gau"
-//   mathcal_V - output: R x 1 variance estimates (modified by reference)
+// --- 5.2 Variance estimation for IMSE1/IMSE2/US1 ---
+// Estimates conditional variance at each evaluation point via five-step
+// procedure: IMSE-DPI bandwidth for conditional mean, residuals, MSE-DPI
+// bandwidth for conditional variance, and LPR estimation scaled by density.
 void _didhetero_bwselect_var_est(real matrix B_g_t,
                                              real colvector Z,
                                              real colvector zeval,
@@ -2134,10 +2008,10 @@ void _didhetero_bwselect_var_est(real matrix B_g_t,
     // Initialize output
     mathcal_V = J(R_eval, 1, .)
 
-    // Support grid for IMSE-DPI bandwidth (100 equally spaced points)
+    // Support grid (100 equispaced points)
     Z_supp = rangen(min(Z), max(Z), 100)
 
-    // === Loop over evaluation points ===
+    // Loop over evaluation points
     for (r = 1; r <= R_eval; r++) {
 
         y_r = B_g_t[., r]
@@ -2145,21 +2019,21 @@ void _didhetero_bwselect_var_est(real matrix B_g_t,
         // Skip if density is non-positive
         if (kd0_Z[r] >= . | kd0_Z[r] <= 0) continue
 
-        // Step 1: IMSE-DPI common bandwidth (p=1, deriv=0)
+        // Bandwidth for conditional mean
         mu_B_0_bw = _didhetero_lpbwselect_imse(y_r, Z, Z_supp,
                         1, 0, kernel)
 
         if (mu_B_0_bw >= . | mu_B_0_bw <= 0) continue
 
-        // Step 2: LLR at all observation points (eval=Z)
+        // Local linear regression at observation points
         mu_B_0 = didhetero_lpr(y_r, Z, Z, 1, 0, kernel, mu_B_0_bw)
 
         if (rows(mu_B_0) != n) continue
 
-        // Step 3: Residuals
+        // Residuals
         U_hat = y_r - mu_B_0
 
-        // Step 4: MSE-DPI bandwidth for sigma^2 (p=1, deriv=0)
+        // Bandwidth for conditional variance
         U_hat_sq = U_hat :^ 2
         sigma2_bw_vec = _didhetero_lpbwselect_mse(U_hat_sq, Z,
                             zeval[r..r], 1, 0, kernel)
@@ -2167,7 +2041,7 @@ void _didhetero_bwselect_var_est(real matrix B_g_t,
 
         if (sigma2_bw >= . | sigma2_bw <= 0) continue
 
-        // Step 5: Estimate conditional variance
+        // Estimate conditional variance
         {
             real colvector sigma2_vec
             sigma2_vec = didhetero_lpr(U_hat_sq, Z, zeval[r..r],
@@ -2177,31 +2051,14 @@ void _didhetero_bwselect_var_est(real matrix B_g_t,
 
         if (sigma2 >= . | sigma2 <= 0) continue
 
-        // mathcal_V[r] = const_V * sigma^2 / f(z_r)
-        mathcal_V[r] = const_V * sigma2 / kd0_Z[r]
+            mathcal_V[r] = const_V * sigma2 / kd0_Z[r]
     }
 }
 
 
-// --- 5.3a IMSE1/US1 shared internal implementation ---
-// Parameterized IMSE1 bandwidth selection with configurable n exponent.
-// IMSE1 uses n^(-1/5), US1 uses n^(-2/7). All other logic is identical.
-//
-// Algorithm (Paper Section 4.2.5):
-//   For each evaluation point r = 1..R:
-//     Bias:  MSE-DPI bw for 2nd deriv → LPR 2nd deriv → B[r] = mu2 * I_2_K1/2
-//     Var:   Shared variance estimation via _didhetero_bwselect_var_est
-//   Then: h = (int_V / (4 * int_B^2))^(1/5) * n^(n_exponent)
-//
-// Args:
-//   B_g_t      - n x R matrix, each column is the influence function at one eval point
-//   Z          - n x 1 covariate vector
-//   zeval      - R x 1 sorted evaluation points
-//   kd0_Z      - R x 1 kernel density estimates at zeval
-//   kernel     - "epa" or "gau"
-//   n_exponent - exponent for n: -1/5 for IMSE1, -2/7 for US1
-//
-// Returns: scalar bandwidth (or . on failure)
+// --- 5.3a IMSE1/US1 internal implementation ---
+// Bandwidth selection minimizing approximate IMSE. IMSE1 uses n^(-1/5),
+// US1 uses n^(-2/7) for undersmoothing.
 real scalar _dh_bwselect_imse1_internal(real matrix B_g_t,
                                       real colvector Z,
                                       real colvector zeval,
@@ -2231,20 +2088,20 @@ real scalar _dh_bwselect_imse1_internal(real matrix B_g_t,
     // Initialize bias vector
     mathcal_B = J(R_eval, 1, .)
 
-    // === Bias estimation loop ===
+    // Bias estimation
     for (r = 1; r <= R_eval; r++) {
 
         y_r = B_g_t[., r]
 
-        // --- Bias estimation ---
-        // MSE-DPI bandwidth for 2nd derivative (p=3, deriv=2)
+        // Bias estimation
+        // Bandwidth for second derivative
         mu_B_2_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
                             zeval[r..r], 3, 2, kernel)
         mu_B_2_bw = mu_B_2_bw_vec[1]
 
         if (mu_B_2_bw >= . | mu_B_2_bw <= 0) continue
 
-        // Estimate 2nd derivative via LPR (p=3, deriv=2)
+        // Estimate second derivative
         {
             real colvector mu_B_2_vec
             mu_B_2_vec = didhetero_lpr(y_r, Z, zeval[r..r],
@@ -2254,28 +2111,24 @@ real scalar _dh_bwselect_imse1_internal(real matrix B_g_t,
 
         if (mu_B_2 >= .) continue
 
-        // mathcal_B[r] = mu^(2) * I_{2,K} / 2
         mathcal_B[r] = mu_B_2 * I_2_K1 / 2
     }
 
-    // === Variance estimation via shared function ===
+    // Variance estimation
     _didhetero_bwselect_var_est(B_g_t, Z, zeval, kd0_Z, const_V1,
                                            kernel, mathcal_V)
 
-    // === Trapezoidal integration ===
-    // Note: integrates B^2 (not B), matching the IMSE formula
+    // Trapezoidal integration of squared bias and variance
     int_bias = _didhetero_trapz(zeval, mathcal_B :^ 2)
     int_var  = _didhetero_trapz(zeval, mathcal_V)
 
-    // === Edge cases ===
+    // Edge case handling
     h_max = (max(Z) - min(Z)) / 2
 
     if (int_bias >= . | int_bias < 1e-20) return(h_max)
     if (int_var >= . | int_var <= 0) return(.)
 
-    // === IMSE1/US1 formula ===
-    // h = (int_V / (4 * int_B^2))^(1/5) * n^(n_exponent)
-    // IMSE1: n_exponent = -1/5, US1: n_exponent = -2/7
+    // Final bandwidth formula
     h_opt = (int_var / (4 * int_bias))^(1/5) * n^(n_exponent)
 
     if (h_opt >= . | h_opt <= 0) return(.)
@@ -2284,8 +2137,7 @@ real scalar _dh_bwselect_imse1_internal(real matrix B_g_t,
 }
 
 
-// --- 5.3b IMSE1 bandwidth selection (thin wrapper) ---
-// Calls the shared internal function with n_exponent = -1/5
+// --- 5.3b IMSE1 bandwidth selection ---
 real scalar _didhetero_bwselect_imse1(real matrix B_g_t,
                                       real colvector Z,
                                       real colvector zeval,
@@ -2297,11 +2149,6 @@ real scalar _didhetero_bwselect_imse1(real matrix B_g_t,
 
 
 // --- 5.3c US1 bandwidth selection (undersmoothing) ---
-// US1 uses the same bias/variance estimation as IMSE1 but with
-// n^(-2/7) instead of n^(-1/5), producing a smaller bandwidth
-// that satisfies the uniform inference condition.
-//
-// Paper ref: Section 4.2.6 (Undersmoothing bandwidth)
 real scalar _didhetero_bwselect_us1(real matrix B_g_t,
                                      real colvector Z,
                                      real colvector zeval,
@@ -2312,25 +2159,9 @@ real scalar _didhetero_bwselect_us1(real matrix B_g_t,
 }
 
 
-// --- 5.4 IMSE2 bandwidth selection (LQR bias) ---
-// Computes the IMSE-optimal bandwidth for local quadratic regression.
-//
-// Algorithm (Paper Section 4.2.5, LQR case):
-//   For each evaluation point r = 1..R:
-//     Bias:  3rd deriv (p=4, deriv=3) + 4th deriv (p=5, deriv=4)
-//            → B[r] = (1/(24*f(z_r))) * (2*mu3*f'(z_r) + mu4*f(z_r)) * C_B_LQ
-//     Var:   Shared variance estimation with const_V = C_V2
-//   Then: h = (int_V / (8 * int_B^2))^(1/9) * n^(-1/9)
-//
-// Args:
-//   B_g_t  - n x R matrix, each column is the influence function
-//   Z      - n x 1 covariate vector
-//   zeval  - R x 1 sorted evaluation points
-//   kd0_Z  - R x 1 kernel density estimates at zeval
-//   kd1_Z  - R x 1 kernel density DERIVATIVE estimates at zeval
-//   kernel - "epa" or "gau"
-//
-// Returns: scalar bandwidth (or . on failure)
+// --- 5.4 IMSE2 bandwidth selection (local quadratic regression) ---
+// Computes IMSE-optimal bandwidth using third and fourth derivatives
+// of the influence function.
 real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
                                       real colvector Z,
                                       real colvector zeval,
@@ -2359,16 +2190,13 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
     _didhetero_kernel_constants(kernel, I_2_K1, I_4_K1, I_6_K1,
                                 I_0_K2, I_2_K2, I_4_K2, I_6_K2)
 
-    // Compute C_{B,LQ} = (I_4_K1^2 - I_2_K1*I_6_K1) / (I_4_K1 - I_2_K1^2)
-    // For epa: -1/21 ≈ -0.04762
+    // Bias constant C_{B,LQ}
     cb_num = I_4_K1^2 - I_2_K1 * I_6_K1
     cb_den = I_4_K1 - I_2_K1^2
     if (abs(cb_den) < 1e-30) return(.)
     C_B_LQ = cb_num / cb_den
 
-    // Compute C_{V2} = (I_4_K1^2*I_0_K2 - 2*I_2_K1*I_4_K1*I_2_K2 + I_2_K1^2*I_4_K2)
-    //                  / (I_4_K1 - I_2_K1^2)^2
-    // For epa: 1.25
+    // Variance constant C_{V2}
     cv_num = I_4_K1^2 * I_0_K2 - 2 * I_2_K1 * I_4_K1 * I_2_K2 + I_2_K1^2 * I_4_K2
     cv_den = (I_4_K1 - I_2_K1^2)^2
     if (abs(cv_den) < 1e-30) return(.)
@@ -2377,7 +2205,7 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
     // Initialize bias vector
     mathcal_B = J(R_eval, 1, .)
 
-    // === Bias estimation loop (LQR bias) ===
+    // Bias estimation (local quadratic regression)
     for (r = 1; r <= R_eval; r++) {
 
         y_r = B_g_t[., r]
@@ -2385,7 +2213,7 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
         // Skip if density is non-positive
         if (kd0_Z[r] >= . | kd0_Z[r] <= 0) continue
 
-        // --- 3rd derivative: MSE-DPI bw (p=4, deriv=3) → LPR ---
+        // Third derivative bandwidth and estimation
         mu_B_3_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
                             zeval[r..r], 4, 3, kernel)
         mu_B_3_bw = mu_B_3_bw_vec[1]
@@ -2401,7 +2229,7 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
 
         if (mu_B_3 >= .) continue
 
-        // --- 4th derivative: MSE-DPI bw (p=5, deriv=4) → LPR ---
+        // Fourth derivative bandwidth and estimation
         mu_B_4_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
                             zeval[r..r], 5, 4, kernel)
         mu_B_4_bw = mu_B_4_bw_vec[1]
@@ -2417,27 +2245,24 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
 
         if (mu_B_4 >= .) continue
 
-        // mathcal_B[r] = (1/(24*f(z_r))) * (2*mu3*f'(z_r) + mu4*f(z_r)) * C_B_LQ
         mathcal_B[r] = (1 / (24 * kd0_Z[r])) * (2 * mu_B_3 * kd1_Z[r] + mu_B_4 * kd0_Z[r]) * C_B_LQ
     }
 
-    // === Variance estimation via shared function (with C_V2) ===
+    // Variance estimation
     _didhetero_bwselect_var_est(B_g_t, Z, zeval, kd0_Z, const_V2,
                                            kernel, mathcal_V)
 
-    // === Trapezoidal integration ===
+    // Trapezoidal integration
     int_bias = _didhetero_trapz(zeval, mathcal_B :^ 2)
     int_var  = _didhetero_trapz(zeval, mathcal_V)
 
-    // === Edge cases ===
+    // Edge case handling
     h_max = (max(Z) - min(Z)) / 2
 
     if (int_bias >= . | int_bias < 1e-20) return(h_max)
     if (int_var >= . | int_var <= 0) return(.)
 
-    // === IMSE2 formula ===
-    // h = (int_V / (8 * int_B^2))^(1/9) * n^(-1/9)
-    // Note: denominator is 8 (not 4), exponent is 1/9 (not 1/5)
+    // Final bandwidth formula
     h_opt = (int_var / (8 * int_bias))^(1/9) * n^(-1/9)
 
     if (h_opt >= . | h_opt <= 0) return(.)
@@ -2447,20 +2272,6 @@ real scalar _didhetero_bwselect_imse2(real matrix B_g_t,
 
 
 // --- 5.5 Bandwidth selection dispatch function ---
-// Routes bwselect string to the appropriate bandwidth selection algorithm.
-//
-// Args:
-//   bwselect  - "IMSE1", "IMSE2", "US1", or "manual"
-//   B_g_t     - n x R matrix, each column is the influence function
-//   Z         - n x 1 covariate vector
-//   zeval     - R x 1 sorted evaluation points
-//   kd0_Z     - R x 1 kernel density estimates at zeval
-//   kd1_Z     - R x 1 kernel density DERIVATIVE estimates at zeval
-//               (only needed for IMSE2; ignored otherwise)
-//   kernel    - "epa" or "gau"
-//   bw_manual - (optional) manual bandwidth value; required when bwselect="manual"
-//
-// Returns: scalar bandwidth (or . on failure)
 real scalar _didhetero_bwselect(string scalar bwselect,
                                 real matrix B_g_t,
                                 real colvector Z,
@@ -2496,30 +2307,8 @@ real scalar _didhetero_bwselect(string scalar bwselect,
 
 
 // --- 5.6 Bandwidth selection for all (g,t) pairs ---
-// Outer loop that computes bandwidth for each (g,t) pair, handles manual
-// bandwidth broadcasting, and applies uniformall (minimum) logic.
-//
-// Args:
-//   bwselect     - "IMSE1" | "IMSE2" | "US1" | "manual"
-//   B_g_t_ptrs   - 1 x K pointer rowvector, each pointing to n x R matrix
-//   Z            - n x 1 covariate vector
-//   zeval        - R x 1 sorted evaluation points
-//   kd0_Z        - R x 1 kernel density estimates at zeval
-//   kd1_Z        - R x 1 kernel density derivative estimates at zeval
-//   kernel       - "epa" or "gau"
-//   uniformall   - 1 to take min across all (g,t), 0 for independent
-//   bw_manual    - (optional) scalar or K x 1 vector of manual bandwidths
-//
-// Returns: K x 1 vector of bandwidths
-//
-// Manual bandwidth handling:
-//   - Scalar bw_manual: broadcast to all K (g,t) pairs
-//   - Vector bw_manual (K x 1): each (g,t) uses its own value
-//   - Length mismatch: error
-//
-// Uniformall logic (Paper Section 4.2.5):
-//   - uniformall=1: all (g,t) pairs use min(bw_vec)
-//   - Also applies when bwselect="manual" and bw is scalar
+// Computes bandwidth for each (g,t) pair with manual bandwidth broadcasting
+// and uniformall (common minimum) logic.
 real colvector _didhetero_bwselect_all(
     string scalar bwselect,
     pointer(real matrix) rowvector B_g_t_ptrs,
@@ -2537,7 +2326,7 @@ real colvector _didhetero_bwselect_all(
     K = cols(B_g_t_ptrs)
     bw_vec = J(K, 1, .)
 
-    // === Manual bandwidth handling ===
+    // Manual bandwidth handling
     if (bwselect == "manual") {
         if (args() < 9) {
             _error(3001, "bwselect='manual' requires bw_manual argument")
@@ -2555,15 +2344,14 @@ real colvector _didhetero_bwselect_all(
         }
     }
     else {
-        // === Algorithmic bandwidth selection ===
+        // Algorithmic bandwidth selection
         for (id_gt = 1; id_gt <= K; id_gt++) {
             bw_vec[id_gt] = _didhetero_bwselect(bwselect,
                 *B_g_t_ptrs[id_gt], Z, zeval, kd0_Z, kd1_Z, kernel)
         }
     }
 
-    // === Uniformall: take minimum across all (g,t) pairs ===
-    // Paper Section 4.2.5: common bandwidth for uniform inference
+    // Common bandwidth (minimum across all groups and periods)
     if (uniformall) {
         bw_vec = J(K, 1, min(bw_vec))
     }
@@ -2572,9 +2360,9 @@ real colvector _didhetero_bwselect_all(
 }
 
 
-// --- 4.5 didhetero_lpdensity: density derivative estimation ---
-// Density derivative estimation with MSE-DPI bandwidth selection.
-// Uses CDF-based LPR with unscaled basis (our didhetero_lpr)
+// --- 4.5 Density derivative estimation ---
+// Computes density derivative estimates using CDF-based local polynomial
+// regression with MSE-DPI bandwidth selection.
 real colvector didhetero_lpdensity(real colvector X, real colvector eval,
                                     real scalar p, real scalar v,
                                     string scalar kernel)
@@ -2583,20 +2371,17 @@ real colvector didhetero_lpdensity(real colvector X, real colvector eval,
     real scalar kernel_mapped_ok
     string scalar kernel_mapped
 
-    // Map kernel name: "epanechnikov" is aliased to "epa"
+    // Kernel name mapping
     kernel_mapped = kernel
     if (kernel == "epanechnikov") kernel_mapped = "epa"
 
-    // Step 1: Compute ECDF
+    // Empirical CDF
     F_n = _didhetero_ecdf(X)
 
-    // Step 2: MSE-DPI bandwidth selection
+    // MSE-DPI bandwidth selection
     h_bw = _didhetero_lpdensity_bw_MSE(X, eval, p, v, kernel_mapped)
 
-    // Step 3: CDF-based LPR estimation
-    // Our didhetero_lpr with unscaled basis returns v! * beta_v directly
-    // which equals the v-th derivative of the density
-    // (equivalent to the scaled basis approach in the density estimation literature)
+    // CDF-based local polynomial regression
     lpr_est = didhetero_lpr(F_n, X, eval, p, v, kernel_mapped, h_bw)
 
     return(lpr_est)

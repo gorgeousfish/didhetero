@@ -1,29 +1,32 @@
 // =============================================================================
 // didhetero_simdata.mata — Core data generation for didhetero_simdata command
-//
-// Implements the DGP described in Section 6 of Imai, Qin, and Yanagi (2025)
-//
-// Reference: Imai, Qin, and Yanagi (2025), Section 6
-// Group assignment builds on Callaway and Sant'Anna (2021).
 // =============================================================================
 
 mata:
 mata set matastrict on
 
 // -----------------------------------------------------------------------------
-// didhetero_simdata_core()
+// didhetero_simdata_core() — Core data generation routine
 //
-// Args:
+// Generates panel data with group-time specific treatment effects
+// for Monte Carlo simulations.
+//
+// Parameters:
 //   n          : number of cross-sectional units
 //   tau        : number of time periods (tau > 2)
 //   hc         : 1 = heteroscedastic errors, 0 = homoscedastic
 //   dimx       : dimension of covariates X (>= 1)
-//   dgpy       : DGP for treated potential outcome (1 or 2)
+//   dgpy       : data generating process for treated potential outcome (1 or 2)
 //   continuous : 1 = continuous Z, 0 = discrete Z in {-1, 0, 1}
 //
 // Returns:
 //   real matrix (n*tau) x (4 + dimx) with columns:
 //     id, period, Y, G, Z [, X1, X2, ...]
+// -----------------------------------------------------------------------------
+// Notes on data structure:
+//   - Group G = 0 denotes never-treated units
+//   - Group G > 0 denotes units first treated in period G
+//   - Treatment occurs when period t >= G for treated groups
 // -----------------------------------------------------------------------------
 real matrix didhetero_simdata_core(
     real scalar n,
@@ -42,7 +45,7 @@ real matrix didhetero_simdata_core(
     real scalar U_draw
 
     // -----------------------------------------------------------------
-    // Step 1: Pre-treatment covariate Z
+    // Generate pre-treatment covariate Z
     // -----------------------------------------------------------------
     if (continuous) {
         Z = rnormal(n, 1, 0, 1)
@@ -64,7 +67,8 @@ real matrix didhetero_simdata_core(
     }
 
     // -----------------------------------------------------------------
-    // Step 2: All pre-treatment covariates X
+    // Construct full covariate matrix X
+    // Z forms the first column; remaining covariates are independent N(0,1)
     // -----------------------------------------------------------------
     X = Z
     if (dimx > 1) {
@@ -74,13 +78,12 @@ real matrix didhetero_simdata_core(
     }
 
     // -----------------------------------------------------------------
-    // Step 3: Group support and multinomial logit assignment
+    // Assign units to treatment groups via multinomial logit
     // -----------------------------------------------------------------
-    // group_supp = (0, 2, 3, ..., tau)
+    // Group support: {0} U {2, 3, ..., tau}, where 0 denotes never-treated
     group_supp = 0, (2..tau)
 
-    // Compute group choice probabilities via multinomial logit
-    // gamma = 0.5 * g / tau for each g in group_supp
+    // Linear predictor for group assignment: gamma_g = 0.5 * g / tau
     gamma_vec = 0.5 :* group_supp :/ tau
 
     // group_P: n x length(group_supp) matrix of probabilities
@@ -109,12 +112,12 @@ real matrix didhetero_simdata_core(
     }
 
     // -----------------------------------------------------------------
-    // Step 4: Individual effect
+    // Generate unit-specific fixed effect (correlated with group membership)
     // -----------------------------------------------------------------
     eta = rnormal(1, 1, G, J(n, 1, 1))
 
     // -----------------------------------------------------------------
-    // Step 5: Heteroscedasticity setup
+    // Specify error term standard deviations
     // -----------------------------------------------------------------
     if (hc) {
         u_sd = 0.5 :+ normal(Z)
@@ -126,7 +129,7 @@ real matrix didhetero_simdata_core(
     }
 
     // -----------------------------------------------------------------
-    // Step 6: Data generation loop over time periods
+    // Generate outcomes across all time periods
     // -----------------------------------------------------------------
     data = J(n * tau, 4 + dimx, 0)
 
@@ -135,7 +138,7 @@ real matrix didhetero_simdata_core(
         // Error term for untreated potential outcome
         u = rnormal(n, 1, 0, 1) :* u_sd
 
-        // Untreated potential outcome
+        // Untreated potential outcome: Y_0(t) = delta_t + eta + X*beta_t + u
         delta_t = t
         beta_t0 = J(1, dimx, .)
         for (k = 1; k <= dimx; k++) {
@@ -152,21 +155,20 @@ real matrix didhetero_simdata_core(
         // Error term for treated potential outcome
         v = rnormal(n, 1, 0, 1) :* v_sd
 
-        // Treatment effect term
+        // Treatment effect heterogeneity term (group x time x covariate interaction)
         delta_e = J(n, 1, t) :- G :+ J(n, 1, 1)
 
         if (dgpy == 1) {
             mgt = (G :/ t) :* sin(pi() :* Z)
         }
         else {
-            // DGPY == 2
             mgt = Z :* G :/ t
         }
 
-        // Treated potential outcome
+        // Treated potential outcome: Y_g(t) = Y_0(t) + m(g,t,Z) + delta_e + v - u
         Y_g = Y_0 :+ mgt :+ delta_e :+ v :- u
 
-        // Observed outcome: switching equation
+        // Observed outcome via switching equation: Y = Y_g if treated, else Y_0
         treated = (G :!= 0) :& (G :<= t)
         Y = treated :* Y_g :+ (1 :- treated) :* Y_0
 
@@ -184,17 +186,17 @@ real matrix didhetero_simdata_core(
         }
     }
 
-    // Sort by id, then period
+    // Return data sorted by unit and time period
     data = sort(data, (1, 2))
 
     return(data)
 }
 
 // -----------------------------------------------------------------------------
-// _didhetero_simdata_to_stata()
+// _didhetero_simdata_to_stata() — Bridge to Stata interface
 //
-// Bridge function: calls didhetero_simdata_core(), then writes the result
-// matrix into Stata variables using st_addobs() and st_store().
+// Generates simulated data via didhetero_simdata_core() and exports
+// the result to Stata variables using st_addobs() and st_store().
 // -----------------------------------------------------------------------------
 void _didhetero_simdata_to_stata(
     real scalar n,
@@ -207,7 +209,7 @@ void _didhetero_simdata_to_stata(
     real matrix data
     real scalar nobs, k, idx
 
-    // Generate data
+    // Generate simulated dataset
     data = didhetero_simdata_core(n, tau, hc, dimx, dgpy, continuous)
     nobs = rows(data)
 

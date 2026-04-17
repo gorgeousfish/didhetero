@@ -1,54 +1,49 @@
 // =============================================================================
-// didhetero_bootstrap_opt.mata
-// Optimized bootstrap main loop for the didhetero-stata package
+// Optimized Bootstrap Implementation for Uniform Confidence Bands
 //
-// Uses batch weight generation and pre-computed invariants to accelerate
-// the bootstrap UCB procedure. Replaces the naive per-iteration LPR calls
-// with pre-computed R'KR / R'KA and batched Mammen weight draws.
+// This module implements a computationally efficient multiplier bootstrap
+// procedure for constructing uniform confidence bands. The algorithm employs
+// batch weight generation and pre-computed kernel invariants to reduce
+// per-iteration computational overhead.
 //
-// Dependencies:
-//   - didhetero_bootstrap.mata (#13): didhetero_bootstrap_precompute(),
-//     didhetero_bootstrap_iter_gt(), _didhetero_bs_quantile(),
-//     didhetero_max_nonmissing()
-//   - didhetero_boot.mata (#14): _didhetero_mammen_weights_batch()
-//
-// Paper ref: Section 4.2.4, multiplier bootstrap UCB
+// Key optimizations:
+//   1. Pre-computation of R'KR and R'KA matrices eliminates repeated kernel
+//      evaluations across bootstrap iterations
+//   2. Vectorized generation of Mammen multipliers in batches reduces
+//      function call overhead
+//   3. Memory-efficient storage using only the sup-t statistic matrix
 // =============================================================================
 
 mata:
 
 // -----------------------------------------------------------------------------
-// _dh_catt_boot_optimized()
-// Optimized bootstrap UCB with batch weight generation and progress reporting.
+// didhetero_boot_ucb_optimized()
 //
-// Same semantics as didhetero_bootstrap_ucb() but:
-//   1. Uses didhetero_bootstrap_precompute() for O(1) per-iteration kernel work
-//   2. Uses _didhetero_mammen_weights_batch() for vectorized weight generation
-//   3. Allocates only mb_sup_t (no mb_est/mb_t arrays)
-//   4. Reports ETA-aware progress every 100 iterations
+// Computes uniform confidence bands via multiplier bootstrap with optimized
+// memory allocation and batch processing. This implementation reduces
+// computational overhead through pre-computed invariants and vectorized
+// weight generation.
 //
-// Args:
-//   A_g_t         - pointer(real matrix) rowvector, 1 x num_gteval
-//   est           - real matrix, num_zeval x num_gteval point estimates
-//   se            - real matrix, num_zeval x num_gteval standard errors
-//   bw            - real colvector, num_gteval x 1 bandwidths
-//   Z             - real colvector, n x 1 covariate values
-//   zeval         - real colvector, num_zeval x 1 evaluation points
-//   n             - real scalar, sample size
-//   porder        - real scalar, polynomial order for LPR
-//   kernel        - string scalar, kernel type ("epa" or "gau")
-//   alp           - real scalar, significance level
-//   biters        - real scalar, number of bootstrap iterations
-//   uniformall    - real scalar, 1=uniform across all (g,t), 0=per (g,t)
-//   num_gteval    - real scalar, number of (g,t) pairs
-//   num_zeval     - real scalar, number of evaluation points
-//   ci2_lower     - real matrix, output num_zeval x num_gteval lower CI bounds
-//   ci2_upper     - real matrix, output num_zeval x num_gteval upper CI bounds
-//   c_check       - real colvector, output num_gteval x 1 critical values
-//   batch_size    - (optional) real scalar, weight batch size (default 100)
-//   show_progress - (optional) real scalar, 1=show progress (default 1)
-//
-// Paper ref: Section 4.2.4, multiplier bootstrap UCB
+// Parameters:
+//   A_g_t         - pointer rowvector to influence matrices for each (g,t)
+//   est           - point estimates (num_zeval x num_gteval)
+//   se            - standard errors (num_zeval x num_gteval)
+//   bw            - bandwidth vector (num_gteval x 1)
+//   Z             - covariate values (n x 1)
+//   zeval         - evaluation points (num_zeval x 1)
+//   n             - sample size
+//   porder        - polynomial order for local polynomial regression
+//   kernel        - kernel type ("epa" or "gau")
+//   alp           - significance level
+//   biters        - number of bootstrap iterations
+//   uniformall    - flag for uniform band type (1=all (g,t), 0=per (g,t))
+//   num_gteval    - number of (g,t) pairs
+//   num_zeval     - number of evaluation points
+//   ci2_lower     - output: lower confidence bounds (num_zeval x num_gteval)
+//   ci2_upper     - output: upper confidence bounds (num_zeval x num_gteval)
+//   c_check       - output: critical values (num_gteval x 1)
+//   batch_size    - optional: batch size for weight generation (default 100)
+//   show_progress - optional: display progress indicator (default 1)
 // -----------------------------------------------------------------------------
 void didhetero_boot_ucb_optimized(
     pointer(real matrix) rowvector A_g_t,
@@ -78,7 +73,7 @@ void didhetero_boot_ucb_optimized(
     real colvector mb_weight, mb_sup_t_all
     struct BootPrecomp scalar precomp
 
-    // === Default optional parameters ===
+    // Set default values for optional parameters
     if (args() < 18) {
         batch_size = 100
     }
@@ -86,9 +81,7 @@ void didhetero_boot_ucb_optimized(
         show_progress = 1
     }
 
-    // === Auto-override: uniformall forced to FALSE when num_gteval == 1 ===
-    // When there is only one (g,t) pair, row-max across columns is identity,
-    // so uniformall=TRUE degenerates to uniformall=FALSE. Force it explicitly.
+    // Override uniformall when only one (g,t) pair exists
     if (num_gteval == 1) {
         effective_uniformall = 0
     }
@@ -96,39 +89,39 @@ void didhetero_boot_ucb_optimized(
         effective_uniformall = uniformall
     }
 
-    // === Pre-compute bootstrap invariants ===
+    // Pre-compute kernel invariants for efficient iteration
     didhetero_bootstrap_precompute(A_g_t, Z, zeval, bw, porder, kernel, ///
         n, num_gteval, num_zeval, precomp)
 
-    // === Allocate only sup-t array (no mb_est/mb_t) ===
+    // Allocate storage for supremum t-statistics
     mb_sup_t = J(biters, num_gteval, .)
 
-    // === Bootstrap batch loop ===
+    // Main bootstrap loop with batch processing
     for (batch_start = 1; batch_start <= biters; batch_start = batch_start + batch_size) {
 
-        // Determine actual batch size (last batch may be smaller)
+        // Adjust batch size for final iteration
         batch_end = min((batch_start + batch_size - 1, biters))
         actual_batch = batch_end - batch_start + 1
 
-        // Generate weights for entire batch at once
+        // Generate Mammen multipliers for current batch
         weight_batch = _didhetero_mammen_weights_batch(actual_batch, n)
 
-        // Inner loop over iterations within this batch
+        // Process each bootstrap iteration in batch
         for (b_in_batch = 1; b_in_batch <= actual_batch; b_in_batch++) {
 
             b = batch_start + b_in_batch - 1
 
-            // Extract weight vector for this iteration (row -> column)
+            // Extract weight vector for current iteration
             mb_weight = weight_batch[b_in_batch, .]'
 
-            // Loop over (g,t) pairs
+            // Compute sup-t statistic for each (g,t) pair
             for (id_gt = 1; id_gt <= num_gteval; id_gt++) {
                 mb_sup_t[b, id_gt] = didhetero_bootstrap_iter_gt( ///
                     mb_weight, precomp, A_g_t[id_gt], ///
                     est[., id_gt], se[., id_gt], id_gt)
             }
 
-            // Progress display every 100 iterations
+            // Display progress at specified intervals
             if (show_progress) {
                 if (mod(b, 100) == 0 | b == biters) {
                     printf("Bootstrap: %g/%g (%5.1f%%)\n", ///
@@ -138,12 +131,11 @@ void didhetero_boot_ucb_optimized(
         }
     }
 
-    // === Critical value extraction ===
-    // (Copied from didhetero_bootstrap_ucb)
+    // Extract critical values from bootstrap distribution
     c_check = J(num_gteval, 1, .)
 
     if (effective_uniformall) {
-        // uniformall=TRUE: row-wise max across (g,t), then single quantile
+        // Uniform band: max across all (g,t), then single quantile
         mb_sup_t_all = J(biters, 1, .)
         for (b = 1; b <= biters; b++) {
             mb_sup_t_all[b] = didhetero_max_nonmissing(mb_sup_t[b, .]')
@@ -152,13 +144,13 @@ void didhetero_boot_ucb_optimized(
         c_check = J(num_gteval, 1, c_val)
     }
     else {
-        // uniformall=FALSE: column-wise quantile, one per (g,t)
+        // Pointwise band: separate quantile for each (g,t)
         for (id_gt = 1; id_gt <= num_gteval; id_gt++) {
             c_check[id_gt] = _didhetero_bs_quantile(mb_sup_t[., id_gt], 1 - alp)
         }
     }
 
-    // === Construct CI2 ===
+    // Construct uniform confidence intervals
     ci2_lower = J(num_zeval, num_gteval, .)
     ci2_upper = J(num_zeval, num_gteval, .)
 

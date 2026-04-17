@@ -8,13 +8,11 @@
 //   Working directory must be set to didhetero-stata/
 // =============================================================================
 
-// Recover working directory after clear all
-// profile.do may change cwd; detect and restore project root
+// Clear memory and set working directory
 clear all
 set more off
 
-// Prefer the current do-file location so absolute-path invocations work even
-// when profile.do or the caller changed the working directory.
+// Determine package root from do-file location
 local PKGROOT ""
 local DOFILE `"`c(filename)'"'
 if strpos(`"`DOFILE'"', "/make.do") {
@@ -57,9 +55,7 @@ if _rc {
     exit 601
 }
 
-// Optional: load QA environment helpers when present (development only).
-// The build itself does not depend on any globals set by _dh_test_env.do,
-// so a missing tests/ directory (e.g. in a release tarball) is harmless.
+// Load test environment if available
 capture noisily do "tests/_dh_test_env.do"
 if _rc {
     capture noisily do "didhetero-stata/tests/_dh_test_env.do"
@@ -91,7 +87,7 @@ capture erase "ado/ldidhetero.mlib"
 // =========================================================================
 display _n "Stage 3: Compiling Mata source files..."
 
-// #1 - Struct definitions (no dependencies)
+// Data structure definitions
 display as text "  Compiling: mata/didhetero_types.mata"
 capture noisily do "mata/didhetero_types.mata"
 if _rc {
@@ -99,7 +95,7 @@ if _rc {
     exit _rc
 }
 
-// #2 - Kernel functions (depends on: types)
+// Kernel weight computation
 display as text "  Compiling: mata/didhetero_kernel.mata"
 capture noisily do "mata/didhetero_kernel.mata"
 if _rc {
@@ -107,7 +103,7 @@ if _rc {
     exit _rc
 }
 
-// #3 - Utility functions (depends on: types, kernel)
+// Utility functions
 display as text "  Compiling: mata/didhetero_utils.mata"
 capture noisily do "mata/didhetero_utils.mata"
 if _rc {
@@ -115,7 +111,7 @@ if _rc {
     exit _rc
 }
 
-// #4 - Local polynomial regression (depends on: types, kernel, utils)
+// Local polynomial regression
 display as text "  Compiling: mata/didhetero_lpr.mata"
 capture noisily do "mata/didhetero_lpr.mata"
 if _rc {
@@ -123,7 +119,7 @@ if _rc {
     exit _rc
 }
 
-// #5 - Bandwidth selection (depends on: kernel, lpr, utils)
+// Bandwidth selection
 display as text "  Compiling: mata/didhetero_bwselect.mata"
 capture noisily do "mata/didhetero_bwselect.mata"
 if _rc {
@@ -131,7 +127,7 @@ if _rc {
     exit _rc
 }
 
-// #6 - Kernel density estimation (depends on: kernel, bwselect)
+// Kernel density estimation
 display as text "  Compiling: mata/didhetero_kde.mata"
 capture noisily do "mata/didhetero_kde.mata"
 if _rc {
@@ -139,9 +135,9 @@ if _rc {
     exit _rc
 }
 
-// === Epic 2+ modules (add below in dependency order) ===
+// Estimation modules
 
-// #7 - GPS estimation (depends on: types, utils)
+// Generalized propensity score estimation
 display as text "  Compiling: mata/didhetero_gps.mata"
 capture noisily do "mata/didhetero_gps.mata"
 if _rc {
@@ -149,7 +145,7 @@ if _rc {
     exit _rc
 }
 
-// #8 - OR estimation (depends on: types, utils)
+// Outcome regression estimation
 display as text "  Compiling: mata/didhetero_or.mata"
 capture noisily do "mata/didhetero_or.mata"
 if _rc {
@@ -157,7 +153,7 @@ if _rc {
     exit _rc
 }
 
-// #9 - Stage 1 dispatch (depends on: types, utils, gps, or, kde, bwselect)
+// Stage 1 estimation dispatch
 display as text "  Compiling: mata/didhetero_stage1.mata"
 capture noisily do "mata/didhetero_stage1.mata"
 if _rc {
@@ -165,7 +161,7 @@ if _rc {
     exit _rc
 }
 
-// #10 - Intermediate variable construction (depends on: types, utils, gps, or)
+// Intermediate variable construction
 display as text "  Compiling: mata/didhetero_intermediate.mata"
 capture noisily do "mata/didhetero_intermediate.mata"
 if _rc {
@@ -173,21 +169,21 @@ if _rc {
     exit _rc
 }
 
-// #11 - CATT core reentrant function (depends on: types, lpr, bwselect, intermediate, stage23 helpers)
+// CATT estimation core
 display as text "  Compiling: mata/didhetero_catt_core.mata"
 capture noisily do "mata/didhetero_catt_core.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_catt_core.mata (rc = " _rc ")"
     exit _rc
 }
-// #11a - Stage 2/3 estimation (depends on: types, lpr, bwselect, intermediate, catt_core)
+// Stage 2 and 3 estimation
 display as text "  Compiling: mata/didhetero_stage23.mata"
 capture noisily do "mata/didhetero_stage23.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_stage23.mata (rc = " _rc ")"
     exit _rc
 }
-// #12 - SE estimation and analytical UCB (depends on: types, lpr, bwselect)
+// Standard error and analytical uniform confidence band
 display as text "  Compiling: mata/didhetero_se.mata"
 capture noisily do "mata/didhetero_se.mata"
 if _rc {
@@ -195,7 +191,7 @@ if _rc {
     exit _rc
 }
 
-// #13 - Bootstrap UCB helpers (depends on: lpr)
+// Bootstrap uniform confidence band
 display as text "  Compiling: mata/didhetero_bootstrap.mata"
 capture noisily do "mata/didhetero_bootstrap.mata"
 if _rc {
@@ -203,7 +199,7 @@ if _rc {
     exit _rc
 }
 
-// #14 - Bootstrap weight generation (no dependencies beyond base Mata)
+// Bootstrap weight generation
 display as text "  Compiling: mata/didhetero_boot.mata"
 capture noisily do "mata/didhetero_boot.mata"
 if _rc {
@@ -211,7 +207,7 @@ if _rc {
     exit _rc
 }
 
-// #14a - Optimized bootstrap main loop (depends on: bootstrap #13, boot #14)
+// Bootstrap optimization
 display as text "  Compiling: mata/didhetero_bootstrap_opt.mata"
 capture noisily do "mata/didhetero_bootstrap_opt.mata"
 if _rc {
@@ -219,11 +215,8 @@ if _rc {
     exit _rc
 }
 
-// NOTE: The legacy placeholder compute loop has been removed from the source
-// tree and build path. The package uses the doubly robust estimation pipeline
-// exclusively.
 
-// #16 - Run orchestration (depends on: all above)
+// Estimation orchestration
 display as text "  Compiling: mata/didhetero_run.mata"
 capture noisily do "mata/didhetero_run.mata"
 if _rc {
@@ -231,7 +224,7 @@ if _rc {
     exit _rc
 }
 
-// #17 - Aggregation module (depends on: types, utils, lpr, bwselect, boot)
+// Aggregation of treatment effects
 display as text "  Compiling: mata/didhetero_aggte.mata"
 capture noisily do "mata/didhetero_aggte.mata"
 if _rc {
@@ -239,7 +232,7 @@ if _rc {
     exit _rc
 }
 
-// #18 - Simulated data generation (standalone, no dependencies)
+// Simulated data generation
 display as text "  Compiling: mata/didhetero_simdata.mata"
 capture noisily do "mata/didhetero_simdata.mata"
 if _rc {
@@ -289,7 +282,7 @@ display as text "  Copy:    ado/ldidhetero.mlib"
 display as text "{hline 50}"
 
 // =========================================================================
-// Stage 7: Legacy test entry retirement
+// Stage 7: Test entry point removed
 // =========================================================================
 if "`0'" == "test" {
     display as error _n "ERROR: make.do no longer accepts the test subcommand."

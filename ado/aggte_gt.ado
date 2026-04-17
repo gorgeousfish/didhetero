@@ -1,23 +1,21 @@
 *! aggte_gt.ado
-*! Version 0.1.0
-*! Aggregated Treatment Effect Estimates (AGGTE)
-*! Post-estimation command for catt_gt
-*!
-*! Reads CATT-level results from e() and orchestrates
-*! Mata aggregation functions (Section 5 of the paper).
-*!
-*! Implements Imai, Qin, and Yanagi (2025).
-*!
+*! Aggregated Group-Time Treatment Effect Estimation
+*! 
+*! Computes doubly robust estimates and uniform confidence bands
+*! for summary parameters that aggregate group-time conditional
+*! average treatment effects (CATT) given a continuous covariate.
+*! 
 *! Syntax:
-*!   aggte_gt, [type() eval() bstrap() biters() porder()
-*!              bwselect() bw() uniformall() seed()]
+*!   aggte_gt, [type(string) eval(numlist) bstrap(string) biters(integer)
+*!              porder(integer) bwselect(string) bw(numlist)
+*!              uniformall(string) seed(integer)]
 
 program define aggte_gt, eclass
     version 16.0
 
-    // =========================================================================
-    // Step 1: Parse syntax
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Syntax parsing
+    // -------------------------------------------------------------
     syntax , [TYpe(string) EVAL(numlist) ///
               BSTRap(string) BITers(integer 1000) ///
               POrder(integer 2) ///
@@ -25,39 +23,27 @@ program define aggte_gt, eclass
               UNIFormall(string) ///
               SEed(integer -1)]
 
-    // =========================================================================
-    // Step 1.5: Normalize upstream e() state before inheriting defaults
-    // =========================================================================
-    // The aggregation step consumes a catt_gt/didhetero output object.
-    // Normalize the upstream e() state before reading any inherited options
-    // such as kernel or alp. This also guarantees that a failed front-end
-    // validation does not leave stale aggte_gt results in memory.
+    // -------------------------------------------------------------
+    // Normalize upstream estimation results
+    // -------------------------------------------------------------
     _aggte_normalize_upstream_e
     quietly _dh_ensure_backend
 
-    // =========================================================================
-    // Step 2: Set parameter defaults
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Parameter defaults
+    // -------------------------------------------------------------
     if "`type'" == "" local type "dynamic"
     if "`bstrap'" == "" local bstrap "true"
-    // Always inherit kernel from the upstream catt_gt/didhetero result.
-    // The aggregation step uses the same kernel as the CATT estimation stage
-    // (Imai, Qin, and Yanagi, 2025, Section 5).
-    // The aggregation layer must not expose a separate kernel override.
     local kernel = e(kernel)
-    // Fallback: if e(kernel) is unavailable, use gau (matching catt_gt default)
     if "`kernel'" == "" local kernel "gau"
     if "`bwselect'" == "" local bwselect "IMSE1"
     if "`uniformall'" == "" local uniformall "true"
 
-    // Normalize supported kernel aliases before validation and Mata dispatch.
     if "`kernel'" == "gaussian" local kernel "gau"
     if "`kernel'" == "epanechnikov" local kernel "epa"
     local bstrap = lower(trim("`bstrap'"))
     local uniformall = lower(trim("`uniformall'"))
 
-    // The aggregation step inherits alp from the upstream catt_gt/didhetero
-    // result object, matching the closed algorithm path described in the paper.
     capture confirm scalar e(alp)
     if _rc {
         local alp 0.05
@@ -67,46 +53,45 @@ program define aggte_gt, eclass
         if missing(`alp') local alp 0.05
     }
 
-    // =========================================================================
-    // Step 3: Parameter validation
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Parameter validation
+    // -------------------------------------------------------------
 
-    // --- Validate type ---
+    // Validate type
     if !inlist("`type'", "dynamic", "group", "calendar", "simple") {
         di as error "aggte_gt: type() must be one of: dynamic, group, calendar, simple"
         di as error "  received: `type'"
         exit 198
     }
 
-    // simple aggregation is a single summary parameter with no eval dimension.
-    // Reject eval() at the public interface instead of silently discarding it.
+    // simple aggregation has no eval dimension
     if "`type'" == "simple" & "`eval'" != "" {
         di as error "aggte_gt: eval() is not allowed when type(simple)"
         di as error "  type(simple) aggregates over all post-treatment (g,t) pairs and has no eval dimension"
         exit 198
     }
 
-    // --- Validate porder ---
+    // Validate porder
     if !inlist(`porder', 1, 2) {
         di as error "aggte_gt: porder() must be 1 or 2"
         di as error "  received: `porder'"
         exit 198
     }
 
-    // --- Validate bwselect ---
+    // Validate bwselect
     if !inlist("`bwselect'", "IMSE1", "IMSE2", "US1", "manual") {
         di as error "bwselect must be 'IMSE1', 'IMSE2', 'US1', or 'manual'"
         exit 198
     }
 
-    // --- Validate alp ---
+    // Validate alp
     if `alp' <= 0 | `alp' >= 1 {
         di as error "aggte_gt: alp() must be in (0, 1)"
         di as error "  received: `alp'"
         exit 198
     }
 
-    // --- Validate kernel ---
+    // Validate kernel
     if !inlist("`kernel'", "gau", "epa") {
         di as error "aggte_gt: kernel() must be gau or epa"
         di as error "  long forms gaussian and epanechnikov are also accepted"
@@ -114,7 +99,7 @@ program define aggte_gt, eclass
         exit 198
     }
 
-    // --- Validate Boolean string options ---
+    // Validate Boolean string options
     if !inlist("`bstrap'", "true", "false") {
         di as error "aggte_gt: bstrap() must be true or false"
         di as error "  received: `bstrap'"
@@ -127,11 +112,7 @@ program define aggte_gt, eclass
         exit 198
     }
 
-    // --- Validate seed domain ---
-    // aggte_gt.sthlp documents seed(-1) as the only sentinel meaning "use the
-    // current RNG state". Reject all other negative integers at the API
-    // boundary so bootstrap reproducibility metadata cannot lie about a seed
-    // value that was never applied.
+    // Validate seed domain
     if (`seed' < -1) {
         di as error "aggte_gt: seed() must be -1 or a nonnegative integer"
         di as error "  seed(-1) leaves the current RNG state unchanged"
@@ -139,24 +120,17 @@ program define aggte_gt, eclass
         exit 198
     }
 
-    // --- Validate biters when bootstrap is enabled ---
-    // biters is only operational when bstrap = TRUE, and non-positive values
-    // must be rejected before entering Mata/bootstrap code.
+    // Validate biters when bootstrap is enabled
     if "`bstrap'" == "true" & `biters' <= 0 {
         di as error "When bstrap = TRUE, biters must be a positive number."
         exit 198
     }
 
-    // =========================================================================
-    // Step 4: e() precondition checks
-    // =========================================================================
+    // -------------------------------------------------------------
+    // e() precondition checks
+    // -------------------------------------------------------------
 
-    // --- 4.1 Check e(cmd) source ---
-    // Accept results produced by either catt_gt (post-estimation) or
-    // didhetero (main wrapper), and also allow re-runs when e(cmd) has been
-    // set to "aggte_gt" by a previous call. Rationale: both catt_gt.ado and
-    // didhetero.ado populate the exact same e() matrices consumed below, and
-    // subsequent checks (4.2–4.3) verify their presence and integrity.
+    // Check e(cmd) source
     if ("`e(cmd)'" != "catt_gt") & ("`e(cmd)'" != "didhetero") & ("`e(cmd)'" != "aggte_gt") {
         di as error "aggte_gt requires catt_gt or didhetero results in e()"
         di as error "  e(cmd) = `e(cmd)'"
@@ -164,7 +138,7 @@ program define aggte_gt, eclass
         exit 301
     }
 
-    // --- 4.2 Check all required matrices exist ---
+    // Check required matrices exist
     local _aggte_req_matrices "B_g_t G_g Z mu_G_g gteval catt_est catt_se zeval bw kd0_Z kd1_Z Z_supp"
     foreach _mat of local _aggte_req_matrices {
         capture confirm matrix e(`_mat')
@@ -176,7 +150,7 @@ program define aggte_gt, eclass
         }
     }
 
-    // --- 4.3 Check required scalar e(gbar) ---
+    // Check required scalar e(gbar)
     capture confirm scalar e(gbar)
     if _rc {
         di as error "aggte_gt: required scalar e(gbar) not found in e() results"
@@ -185,10 +159,7 @@ program define aggte_gt, eclass
         exit 198
     }
 
-    // --- 4.4 Snapshot the upstream base e() state and clear stale aggte ---
-    // Failed aggte_gt calls should not leave the previous aggregated e() in
-    // memory. Fall back to the underlying catt_gt / didhetero result
-    // object when aggregation fails.
+    // Snapshot upstream e() state and clear stale results
     tempname _agg_base_results _agg_base_estimate _agg_base_estimate_b _agg_base_gteval ///
              _agg_base_zeval _agg_base_bw _agg_base_c_hat _agg_base_c_check ///
              _agg_base_B_g_t _agg_base_G_g _agg_base_Z _agg_base_dh_Y_wide ///
@@ -346,7 +317,7 @@ program define aggte_gt, eclass
     ereturn local control_group "`_agg_base_control_group'"
     ereturn local control "`_agg_base_control'"
 
-    // --- 4.5 Reject non-dynamic aggregation with no post-treatment pairs ---
+    // Reject non-dynamic aggregation with no post-treatment pairs
     if inlist("`type'", "group", "calendar", "simple") {
         mata: st_numscalar("__aggte_post_pairs", ///
             sum((st_matrix("e(gteval)")[., 2] :>= st_matrix("e(gteval)")[., 1]) :& ///
@@ -357,11 +328,11 @@ program define aggte_gt, eclass
         }
     }
 
-    // =========================================================================
-    // Step 5: Build eval vector
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Build eval vector
+    // -------------------------------------------------------------
 
-    // --- 5.1 Convert user eval numlist to temp matrix (if specified) ---
+    // Convert user eval numlist to matrix
     tempname tmp_eval_user
     local _has_user_eval = 0
     if "`eval'" != "" {
@@ -381,7 +352,7 @@ program define aggte_gt, eclass
         }
     }
 
-    // --- 5.2 Call Mata helper to build eval vector ---
+    // Build eval vector via Mata
     tempname tmp_eval_result
     if `_has_user_eval' == 1 {
         mata: st_matrix("`tmp_eval_result'",    ///
@@ -400,8 +371,7 @@ program define aggte_gt, eclass
 
     local num_eval = rowsof(`tmp_eval_result')
 
-    // Automatic aggregation bandwidths integrate over z and are only defined
-    // when at least one eval-specific aggregation truly needs Pass 1.
+    // Validate automatic bandwidth requirements
     if lower("`bwselect'") != "manual" & `_agg_base_num_zeval' < 2 {
         mata: st_numscalar("__aggte_need_pass1_autobw", ///
             _aggte_requires_pass1_bw(                    ///
@@ -415,11 +385,9 @@ program define aggte_gt, eclass
         }
     }
 
-    // =========================================================================
-    // Step 5.5: Parse manual bandwidth vector (if provided)
-    // =========================================================================
-    // Manual bw() must align one-for-one with the final aggregation eval
-    // vector after implicit/default eval construction.
+    // -------------------------------------------------------------
+    // Parse manual bandwidth vector
+    // -------------------------------------------------------------
     tempname tmp_bw_user
     local _has_user_bw = 0
     if lower("`bwselect'") == "manual" & "`bw'" == "" {
@@ -429,26 +397,25 @@ program define aggte_gt, eclass
     if "`bw'" != "" {
         local _has_user_bw = 1
         local n_bw : word count `bw'
-        // Validate: bw() requires bwselect(manual); reject bw() with other methods
+        // bw() requires bwselect(manual)
         if lower("`bwselect'") != "manual" {
             di as error "aggte_gt: bw() can only be specified when bwselect(manual)"
             exit 198
         }
-        // Parse numlist into a matrix
+        // Parse numlist to matrix
         matrix `tmp_bw_user' = J(`n_bw', 1, .)
         local _i = 0
         foreach _v of local bw {
             local _i = `_i' + 1
             matrix `tmp_bw_user'[`_i', 1] = `_v'
         }
-        // Verify all values are positive
+        // Verify positive values
         mata: st_numscalar("__bw_min_pos", min(st_matrix("`tmp_bw_user'")))
         if (`=scalar(__bw_min_pos)' <= 0) {
             di as error "aggte_gt: all bw() values must be positive"
             exit 198
         }
-        // Manual bandwidths: scalar (applied to all eval) or vector matching eval count.
-        // R aggte_continuous() allows both: scalar or length(eval) vector.
+        // Manual bandwidth: scalar or vector matching eval count
         if (`n_bw' != 1 & `n_bw' != `num_eval') {
             di as error "bw must be a positive scalar or vector whose length equals to the number of eval."
             di as error "  received length(bw)=`n_bw', eval count=`num_eval'"
@@ -456,19 +423,17 @@ program define aggte_gt, eclass
         }
     }
 
-    // =========================================================================
-    // Step 6: Convert string options to numeric flags
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Convert string options to numeric flags
+    // -------------------------------------------------------------
     local _bstrap_flag = ("`bstrap'" == "true")
     local _uniformall_flag = ("`uniformall'" == "true")
 
-    // Kernel has already been normalized to Mata's short codes.
     local _kernel_mata = "`kernel'"
 
-    // =========================================================================
-    // Step 7: Call Mata orchestrator entry point
-    // =========================================================================
-    // Call the Mata entry point; pass bw matrix name when bw() was supplied, else empty string
+    // -------------------------------------------------------------
+    // Call Mata orchestrator
+    // -------------------------------------------------------------
     local _bw_matname ""
     if `_has_user_bw' == 1 local _bw_matname "`tmp_bw_user'"
 
@@ -487,23 +452,20 @@ program define aggte_gt, eclass
         "`_agg_base_control_group'",         ///
         `_agg_base_anticipation')
 
-    // =========================================================================
-    // Step 8: Display results table (best effort)
-    // =========================================================================
-    // The numerical results are already fully computed at this point.
-    // Treat table rendering as non-fatal so `mata clear` cannot break the
-    // post-estimation contract merely through an optional display helper.
+    // -------------------------------------------------------------
+    // Display results table
+    // -------------------------------------------------------------
     capture mata: _didhetero_aggte_display_table( ///
         "`type'", `porder', "`kernel'",           ///
         "`bwselect'", `alp',                      ///
         `_bstrap_flag', `biters',                 ///
         `_uniformall_flag')
 
-    // =========================================================================
-    // Step 9: Store results in e() — append without ereturn post
-    // =========================================================================
+    // -------------------------------------------------------------
+    // Store results in e()
+    // -------------------------------------------------------------
 
-    // --- 9.1 Move matrices from Stata globals to e() ---
+    // Move matrices from Stata globals to e()
     tempname _Est _est _se _ci1l _ci1u _ci2l _ci2u _bwm _evalm _zevalm
 
     matrix `_Est'   = __aggte_Estimate
@@ -531,8 +493,7 @@ program define aggte_gt, eclass
     capture matrix drop __aggte_eval
     capture matrix drop __aggte_zeval
 
-    // --- 9.2 Append to e() using ereturn matrix/scalar/local ---
-    // Note: catt_gt already called ereturn post, so we can append
+    // Append to e()
     ereturn matrix Estimate = `_Est'
     ereturn matrix aggte_est = `_est'
     ereturn matrix aggte_se = `_se'
@@ -555,9 +516,7 @@ program define aggte_gt, eclass
     if (`_bstrap_flag' == 1) & (`seed' >= 0) {
         local _aggte_effective_seed = `seed'
     }
-    // With a single eval point, joint inference over (eval, z) degenerates to
-    // the z-only case, so expose the effective public state instead of the raw
-    // user request.
+    // Single eval point: joint inference degenerates to z-only case
     if `num_eval' == 1 {
         local _aggte_effective_uniformall = 0
     }
@@ -611,8 +570,7 @@ end
 program define _aggte_normalize_upstream_e, eclass
     version 16.0
 
-    // Accept either base results or a previous aggte_gt result that still
-    // carries the full upstream catt_gt/didhetero object in e().
+    // Accept base results or previous aggte_gt result with upstream object
     if ("`e(cmd)'" != "catt_gt") & ("`e(cmd)'" != "didhetero") & ("`e(cmd)'" != "aggte_gt") {
         di as error "aggte_gt requires catt_gt or didhetero results in e()"
         di as error "  e(cmd) = `e(cmd)'"
@@ -620,7 +578,6 @@ program define _aggte_normalize_upstream_e, eclass
         exit 301
     }
 
-    // Nothing to do when upstream e() is already the base estimator.
     if "`e(cmd)'" != "aggte_gt" {
         exit
     }

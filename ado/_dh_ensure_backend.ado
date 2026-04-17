@@ -1,5 +1,4 @@
-*! _dh_ensure_backend.ado
-*! Shared backend loader for didhetero-stata commands.
+*! Backend loader - ensures Mata functions are available
 
 program define _dh_ensure_backend
     version 16.0
@@ -17,9 +16,7 @@ program define _dh_ensure_backend
         exit
     }
 
-    // Rebuild the packaged library index without clearing the current Mata
-    // session. The build workflow may already have loaded fresh source into
-    // memory, and wiping Mata here would discard those definitions.
+    // Rebuild mlib index without clearing Mata session
     capture quietly mata: mata mlib index
 
     capture quietly mata: mata which didhetero_init_from_ado()
@@ -35,8 +32,7 @@ program define _dh_ensure_backend
         exit
     }
 
-    // Fall back to source loading from a checkout tree where ado/ and mata/
-    // are adjacent but ldidhetero.mlib may be absent or incomplete.
+    // Fall back to source loading from adjacent mata/ directory
     local ado_file ""
     foreach probe in didhetero.ado catt_gt.ado aggte_gt.ado didhetero_simdata.ado _dh_ensure_backend.ado {
         capture quietly findfile `probe'

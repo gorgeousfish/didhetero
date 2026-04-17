@@ -4,6 +4,7 @@
 {viewerjumpto "Commands" "didhetero##commands"}{...}
 {viewerjumpto "Syntax" "didhetero##syntax"}{...}
 {viewerjumpto "Options" "didhetero##options"}{...}
+{viewerjumpto "Remarks" "didhetero##remarks"}{...}
 {viewerjumpto "Examples" "didhetero##examples"}{...}
 {viewerjumpto "Stored results" "didhetero##stored"}{...}
 {viewerjumpto "References" "didhetero##references"}{...}
@@ -21,27 +22,25 @@
 
 {pstd}
 The {cmd:didhetero} package implements the doubly robust estimator for
-group-time conditional average treatment effects on the treated (CATT) proposed
-by Imai, Qin, and Yanagi (2025). It extends the standard staggered
-difference-in-differences framework to allow treatment effect heterogeneity
-driven by a continuous pre-treatment covariate.
+group-time conditional average treatment effects on the treated (CATT)
+proposed by Imai, Qin, and Yanagi (2025). It extends the Callaway and
+Sant'Anna (2021) staggered difference-in-differences framework to accommodate
+treatment effect heterogeneity driven by a continuous pre-treatment
+covariate {it:z}.
 
 {pstd}
 The estimator combines inverse probability weighting with outcome regression
-using local polynomial methods, producing nonparametric estimates of how
-treatment effects vary as a function of a continuous covariate {it:z}. Uniform
-confidence bands are constructed via analytical distributional approximation
-and multiplier bootstrap procedures.
+through local polynomial smoothing and reports both pointwise and uniform
+confidence bands. Uniform bands are obtained via an analytical distributional
+approximation and a multiplier bootstrap procedure.
 
 {pstd}
-This package implements the methods described in Imai, Qin, and Yanagi (2025)
-for the Stata platform.
-
-{pstd}
-The {cmd:didhetero} command (documented below) provides a unified interface
-that shares the public estimation options of {helpb catt_gt}, including
-{opt gteval()} and {opt seed()}, while retaining the wrapper-style convenience
-entry point for the main workflow.
+The {cmd:didhetero} command documented here is the unified entry point for
+the package. It shares the estimation engine and option interface of
+{helpb catt_gt}; the two commands are interchangeable for estimation and
+differ only in legacy naming conventions for the boolean toggles. After
+estimation, use {helpb aggte_gt} to aggregate the CATT surface into summary
+parameters and {helpb catt_gt_graph} to plot the results.
 
 
 {marker commands}{...}
@@ -88,30 +87,28 @@ options.
 {synopt:{opt xformula(string)}}complete covariate specification for outcome regression{p_end}
 
 {syntab:Estimation}
-{synopt:{opt porder(#)}}local polynomial order; 1 or 2; default is {cmd:2}{p_end}
+{synopt:{opt porder(#)}}local polynomial order; {cmd:1} or {cmd:2}; default is {cmd:2}{p_end}
 {synopt:{opt kernel(string)}}kernel function; {cmd:gau} or {cmd:epa}; default is {cmd:gau}{p_end}
 {synopt:{opt bwselect(string)}}bandwidth selection method; default is {cmd:IMSE1}{p_end}
-{synopt:{opt bw(numlist)}}manual bandwidth; vector form requires explicit {cmd:gteval()}{p_end}
+{synopt:{opt bw(numlist)}}manual bandwidth; requires {cmd:bwselect(manual)}{p_end}
 
 {syntab:Inference}
 {synopt:{opt alp(#)}}significance level; default is {cmd:0.05}{p_end}
-{synopt:{opt bstrap(true|false)}}explicit bootstrap toggle; default is {cmd:true}{p_end}
-{synopt:{opt bstrap}}legacy flag alias for {cmd:bstrap(true)}{p_end}
-{synopt:{opt nobootstrap}}legacy flag alias for {cmd:bstrap(false)}{p_end}
+{synopt:{opt bstrap(true|false)}}multiplier bootstrap toggle; default is {cmd:true}{p_end}
 {synopt:{opt biters(#)}}bootstrap iterations; default is {cmd:1000}{p_end}
-{synopt:{opt uniformall(true|false)}}explicit uniform-band toggle; default is {cmd:true}{p_end}
-{synopt:{opt nouniformall}}legacy flag alias for {cmd:uniformall(false)}{p_end}
+{synopt:{opt seed(#)}}RNG seed for bootstrap reproducibility; default is {cmd:-1} (current RNG state){p_end}
+{synopt:{opt uniformall(true|false)}}joint uniform-band toggle; default is {cmd:true}{p_end}
 
 {syntab:Panel}
-{synopt:{opt gteval(numlist)}}(g,t) evaluation pairs: {it:g1 t1 g2 t2 ...}{p_end}
+{synopt:{opt gteval(numlist)}}(g,t) evaluation pairs: {it:g1 t1 g2 t2 ...}; default is all identifiable pairs{p_end}
 {synopt:{opt control_group(string)}}{cmd:notyettreated} or {cmd:nevertreated}; default is {cmd:notyettreated}{p_end}
 {synopt:{opt anticipation(#)}}anticipation periods; default is {cmd:0}{p_end}
-
-{syntab:Pre-trends}
 {synopt:{opt pretrend}}include pre-treatment periods for testing{p_end}
 
-{syntab:Other}
-{synopt:{opt seed(#)}}random-number seed for bootstrap reproducibility; default is {cmd:-1} (use current RNG state){p_end}
+{syntab:Legacy flags}
+{synopt:{opt bstrap}}alias for {cmd:bstrap(true)}{p_end}
+{synopt:{opt nobootstrap}}alias for {cmd:bstrap(false)}{p_end}
+{synopt:{opt nouniformall}}alias for {cmd:uniformall(false)}{p_end}
 {synoptline}
 
 
@@ -193,13 +190,13 @@ Default is {cmd:gau}.
 When {cmd:manual} is specified, the {opt bw()} option must also be provided.
 
 {phang}
-{opt bw(numlist)} specifies manual bandwidth value(s). Only valid when
-{cmd:bwselect(manual)} is specified. All values must be positive. A scalar
-{opt bw()} is always allowed. A vector {opt bw()} is allowed only when
-{opt gteval()} is explicitly provided, and its length must equal the number of
-specified (g,t) pairs. When {opt gteval()} is omitted, {cmd:didhetero}
-automatically builds the full evaluation set and only scalar {opt bw()} is a
-supported public interface.
+{opt bw(numlist)} specifies manual bandwidth value(s) and is valid only when
+{cmd:bwselect(manual)}. All values must be positive. A scalar {opt bw()} is
+always accepted. A vector {opt bw()} is accepted only when {opt gteval()}
+is supplied, in which case its length must equal the number of specified
+(g,t) pairs. When {opt gteval()} is omitted, {cmd:didhetero} builds the
+full evaluation set automatically and only a scalar {opt bw()} is supported
+at the public interface.
 
 {dlgtab:Inference}
 
@@ -208,120 +205,136 @@ supported public interface.
 strictly between 0 and 1. Default is {cmd:0.05}.
 
 {phang}
-{opt bstrap(true|false)} explicitly controls the multiplier bootstrap for
-inference. Bootstrap is enabled by default, so omitting the option keeps
-bootstrap on, {cmd:bstrap(true)} turns it on explicitly, and
-{cmd:bstrap(false)} turns it off.
+{opt bstrap(true|false)} toggles the multiplier bootstrap for uniform
+inference. Bootstrap is enabled by default; omit the option or pass
+{cmd:bstrap(true)} to keep it on, and {cmd:bstrap(false)} to disable it.
 
 {phang}
-{opt bstrap} and {opt nobootstrap} are legacy flag aliases retained for
-backward compatibility. Do not combine either legacy flag with
-{opt bstrap(true|false)}.
+{opt biters(#)} sets the number of bootstrap iterations. Default is
+{cmd:1000}. Must be a positive integer when the bootstrap is enabled.
 
 {phang}
-{opt biters(#)} sets the number of bootstrap iterations. Default is {cmd:1000}.
-Must be a positive integer.
+{opt seed(#)} sets the Stata RNG seed immediately before the bootstrap
+weights are drawn. The default {cmd:seed(-1)} is a sentinel that leaves the
+current RNG state unchanged; the effective seed is recorded in
+{cmd:e(seed_request)} and {cmd:e(seed)}.
 
 {phang}
-{opt uniformall(true|false)} explicitly controls whether inference is joint
-over all evaluation points and (g,t) pairs. Omitting the option keeps the
-default {cmd:uniformall(true)} behavior. The legacy flag {opt nouniformall}
-remains available as an alias for {cmd:uniformall(false)}.
-
-{phang}
-{opt nouniformall} is a legacy flag alias for {cmd:uniformall(false)}. Use
-either form when you want confidence bands that are only uniform over {it:z}
-within each (g,t) pair instead of a single joint critical value over (g,t,z).
+{opt uniformall(true|false)} toggles joint uniform inference over
+(g,t,z). The default {cmd:uniformall(true)} produces a single critical
+value that covers every evaluated (g,t) pair and every {it:z} grid point
+simultaneously. {cmd:uniformall(false)} narrows coverage to bands that are
+uniform over {it:z} within each (g,t) pair.
 
 {dlgtab:Panel}
 
 {phang}
-{opt gteval(numlist)} specifies which (g,t) pairs to evaluate. The numlist
-must contain an even number of values in the format {it:g1 t1 g2 t2 ...}.
-When omitted, all valid (g,t) pairs are evaluated automatically.
+{opt gteval(numlist)} specifies the (g,t) pairs to evaluate. The numlist
+must contain an even number of values in the format
+{it:g1 t1 g2 t2 ...}. When omitted, {cmd:didhetero} evaluates every
+identifiable (g,t) pair implied by the sample support,
+{opt control_group()}, and {opt anticipation()}.
 
 {phang}
-{opt control_group(string)} specifies the comparison group. {cmd:notyettreated}
-uses units not yet treated by period {it:t} as controls. {cmd:nevertreated}
-uses only never-treated units (group = 0). Default is {cmd:notyettreated}.
+{opt control_group(string)} selects the comparison group.
+{cmd:notyettreated} uses units not yet treated by period {it:t} as
+controls. {cmd:nevertreated} uses only never-treated units (group = 0)
+and requires at least one such unit in the sample. Default is
+{cmd:notyettreated}.
 
 {phang}
-{opt anticipation(#)} specifies the number of periods before treatment in which
-anticipation effects may occur. Default is {cmd:0}.
-
-{dlgtab:Pre-trends}
-
-{phang}
-{opt pretrend} includes pre-treatment periods in the estimation for
-pre-trends testing. When specified, CATT estimates for pre-treatment periods
-are computed and can be visualized with {helpb catt_gt_graph}. This option is
-only applicable when {opt gteval()} is omitted, because explicit
-{opt gteval()} already fixes the evaluation pairs.
-More generally, the excluded long-difference baseline period is
-t = g - anticipation - 1; this reduces to event_time = -1 only when
-{cmd:anticipation(0)}.
-
-{dlgtab:Other}
+{opt anticipation(#)} specifies the number of periods before treatment
+in which units may anticipate the intervention. The excluded long-
+difference baseline is period t = g - anticipation - 1; this reduces to
+event_time = -1 when {cmd:anticipation(0)}. Default is {cmd:0}.
 
 {phang}
-{opt seed(#)} sets the random-number seed immediately before bootstrap
-resampling. The default {cmd:seed(-1)} leaves the current Stata RNG state
-unchanged and therefore uses the seed already active in the session.
+{opt pretrend} includes pre-treatment periods in the estimation so that
+CATT estimates can be plotted against a zero reference line for visual
+pre-trends diagnostics. Only applicable when {opt gteval()} is omitted,
+because an explicit {opt gteval()} already fixes the evaluation pairs.
+
+{dlgtab:Legacy flags}
+
+{phang}
+{opt bstrap}, {opt nobootstrap}, and {opt nouniformall} are legacy bare-flag
+aliases for {cmd:bstrap(true)}, {cmd:bstrap(false)}, and
+{cmd:uniformall(false)} respectively. They are retained for backward
+compatibility with earlier versions of the package. Do not combine a
+legacy flag with the corresponding {cmd:true|false} form.
+
+
+{marker remarks}{...}
+{title:Remarks}
+
+{pstd}
+Identification follows Callaway and Sant'Anna (2021) under a conditional
+parallel trends assumption; heterogeneity in the continuous covariate
+{it:z} is identified nonparametrically by the three-stage construction of
+Imai, Qin, and Yanagi (2025). The first stage fits the generalized
+propensity score and outcome regression parametrically; the second and
+third stages estimate the doubly robust influence function and the CATT
+surface by local polynomial regression. The covariate vector X used in
+the first stage is controlled by {opt xformula()}; pass {cmd:xformula(Z)}
+to match the default specification {it:X} = [1, {it:z}] explicitly.
+
+{pstd}
+{cmd:didhetero} and {helpb catt_gt} share the same estimation engine and
+both expose the modern controls {opt gteval()}, {opt seed()}, and
+{opt bstrap(true|false)}. {cmd:didhetero} keeps the {opt nobootstrap}
+convenience syntax, while {helpb catt_gt} keeps the symmetric
+{opt nobstrap} alias. Either command can feed {helpb aggte_gt} for
+aggregation and {helpb catt_gt_graph} for visualization.
+
+{pstd}
+For persistence with {cmd:estimates store} and {cmd:estimates restore},
+{cmd:didhetero} posts a storable {cmd:e(b)} shell and a conformable zero
+{cmd:e(V)}. Generic covariance-based postestimation commands such as
+{cmd:lincom}, {cmd:test}, and {cmd:testparm} are therefore not a supported
+inferential workflow. Use {cmd:e(results)}, {cmd:e(catt_se)}, and the
+reported confidence bands for inference.
 
 
 {marker examples}{...}
 {title:Examples}
 
-{pstd}Setup: generate simulation data{p_end}
+{pstd}Setup: generate simulation data.{p_end}
 {phang2}{cmd:. didhetero_simdata, n(500) tau(4) seed(12345) clear}{p_end}
 
-{pstd}Example 1: Basic estimation on the safe deterministic path{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) bstrap(false)}{p_end}
+{pstd}Example 1: Deterministic path (analytical bands only).{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 -0.4 0 0.4 0.8) bstrap(false)}{p_end}
 {phang2}{cmd:. matrix list e(results)}{p_end}
-{phang2}{it:// bstrap(false) runs the deterministic analytical-CI-only path}{p_end}
 
-{pstd}Example 2: Explicitly pass the default covariate set via {opt xformula()}{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) xformula(Z)}{p_end}
+{pstd}Example 2: Explicit default covariate set via {opt xformula()}.{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 -0.4 0 0.4 0.8) xformula(Z) bstrap(false)}{p_end}
 
-{pstd}Example 2b: Interaction syntax in {opt xformula()}{p_end}
+{pstd}Example 3: Interaction syntax in {opt xformula()}.{p_end}
 {phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
 {phang2}{cmd:        zeval(-0.5 0 0.5) gteval(2 2 2 3 3 3) ///}{p_end}
 {phang2}{cmd:        xformula("Z*X1") bwselect(manual) bw(0.45 0.45 0.45) ///}{p_end}
 {phang2}{cmd:        bstrap(false) uniformall(false)}{p_end}
-{phang2}{it:// Note: xformula("Z*X1") is equivalent to xformula("Z + X1 + Z:X1")} {p_end}
-{phang2}{it:// To include only the interaction, write xformula("Z + Z:X1")} {p_end}
+{phang2}{it:// xformula("Z*X1") expands to xformula("Z + X1 + Z:X1")}{p_end}
+{phang2}{it:// Use xformula("Z + Z:X1") for the interaction without a separate X1 main effect}{p_end}
 
-{pstd}Example 3: Estimate a specific (g,t) pair using {opt gteval()}{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) gteval(2 2)}{p_end}
-{phang2}{cmd:. matrix list e(results)}{p_end}
+{pstd}Example 4: Evaluate a single (g,t) pair via {opt gteval()}.{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 -0.4 0 0.4 0.8) gteval(2 2) bstrap(false)}{p_end}
 
-{pstd}Example 4: Deterministic inference with explicit boolean toggles{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.5 0 0.5) ///}{p_end}
-{phang2}{cmd:        gteval(2 2) xformula(Z) porder(1) kernel(gau) ///}{p_end}
+{pstd}Example 5: Local linear estimator with a manual bandwidth.{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.5 0 0.5) gteval(2 2) xformula(Z) porder(1) ///}{p_end}
 {phang2}{cmd:        bwselect(manual) bw(0.45) bstrap(false) uniformall(false)}{p_end}
 
-{pstd}Example 5: Request a 90% interval by setting {opt alp()}{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 0 0.8) alp(0.10)}{p_end}
+{pstd}Example 6: 90% interval and reproducible bootstrap.{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 0 0.8) alp(0.10) biters(500) seed(42)}{p_end}
 
-{pstd}Example 6: Explicitly request confidence bands only uniform over {it:z}{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 0 0.8) ///}{p_end}
-{phang2}{cmd:        gteval(2 2 2 3) bwselect(manual) bw(0.45) nobootstrap uniformall(false)}{p_end}
-
-{pstd}
-{cmd:didhetero} and {helpb catt_gt} share the same estimation engine.
-Both commands now expose the same modern estimation controls, including
-{opt gteval()}, {opt seed()}, and {opt bstrap(true|false)}. {cmd:didhetero}
-remains the main wrapper-style entry point and keeps the {opt nobootstrap}
-convenience syntax, while {helpb catt_gt} retains its legacy {opt nobstrap}
-alias. Use {helpb aggte_gt} for aggregation and {helpb catt_gt_graph} for
-visualization after either command.
-
-{pstd}
-For persistence, {cmd:didhetero} posts a storable {cmd:e(b)} shell but does
-not publish a covariance matrix. Generic covariance-based postestimation such
-as {cmd:lincom}, {cmd:test}, and {cmd:testparm} is therefore not a supported
-inferential workflow. Use {cmd:e(results)}, {cmd:e(catt_se)}, and the reported
-confidence bands for inference.
+{pstd}Example 7: z-only uniform bands (no joint (g,t,z) coverage).{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 0 0.8) gteval(2 2 2 3) ///}{p_end}
+{phang2}{cmd:        bwselect(manual) bw(0.45) bstrap(false) uniformall(false)}{p_end}
 
 
 {marker stored}{...}
@@ -364,33 +377,35 @@ confidence bands for inference.
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Matrices}{p_end}
-{synopt:{cmd:e(results)}}main results matrix with columns: g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw; rows are ordered by ascending z within each (g,t){p_end}
+{synopt:{cmd:e(b)}}storable estimate row used by {cmd:estimates store}; inference uses {cmd:e(results)} and {cmd:e(catt_se)} instead{p_end}
+{synopt:{cmd:e(V)}}conformable zero matrix posted for persistence; no covariance inference is supported{p_end}
+{synopt:{cmd:e(results)}}main results matrix with columns: g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw; rows ordered by ascending {it:z} within each (g,t){p_end}
 {synopt:{cmd:e(Estimate)}}alias of {cmd:e(results)}{p_end}
-{synopt:{cmd:e(Estimate_b)}}vectorized point estimates used by the storable eclass shell{p_end}
-{synopt:{cmd:e(B_g_t)}}flattened influence function matrix B_{i,g,t}(z_r); used internally by {helpb aggte_gt}{p_end}
-{synopt:{cmd:e(G_g)}}group indicator matrix (n x K); G_{i,g} = 1 if unit i belongs to group g{p_end}
-{synopt:{cmd:e(mu_G_g)}}conditional mean of G at evaluation points (R x K); E[G_g | Z = z_r]{p_end}
-{synopt:{cmd:e(gteval)}}evaluated (g,t) pairs (K x 2 matrix){p_end}
-{synopt:{cmd:e(zeval)}}evaluation points for z, sorted in ascending order{p_end}
+{synopt:{cmd:e(Estimate_b)}}vectorized point estimates used by the storable {cmd:e(b)} shell{p_end}
+{synopt:{cmd:e(gteval)}}evaluated (g,t) pairs (K x 2){p_end}
+{synopt:{cmd:e(zeval)}}evaluation points for {it:z}, sorted ascending{p_end}
 {synopt:{cmd:e(bw)}}bandwidth per (g,t) pair{p_end}
 {synopt:{cmd:e(c_hat)}}analytical joint critical values per (g,t) pair{p_end}
-{synopt:{cmd:e(c_check)}}bootstrap critical values per (g,t) pair (if {opt bstrap}){p_end}
+{synopt:{cmd:e(c_check)}}multiplier bootstrap critical values per (g,t) pair; only when {cmd:e(bstrap)} is 1{p_end}
 {synopt:{cmd:e(catt_est)}}CATT point estimates{p_end}
 {synopt:{cmd:e(catt_se)}}CATT standard errors{p_end}
-{synopt:{cmd:e(kd0_Z)}}kernel density estimates at z{p_end}
-{synopt:{cmd:e(kd1_Z)}}kernel density derivative estimates at z{p_end}
-{synopt:{cmd:e(Z_supp)}}support of Z{p_end}
+{synopt:{cmd:e(kd0_Z)}}kernel density estimates at {it:z}{p_end}
+{synopt:{cmd:e(kd1_Z)}}kernel density derivative estimates at {it:z}{p_end}
+{synopt:{cmd:e(Z_supp)}}support of {it:Z}{p_end}
 
 {pstd}
-The following additional matrices capture the panel snapshot used by
-{helpb aggte_gt} for two-pass aggregation and are not part of the user-facing
-inference output:
+The remaining matrices capture the panel snapshot used by {helpb aggte_gt}
+for two-pass aggregation and are not part of the user-facing inference
+output:
 
 {synoptset 20 tabbed}{...}
-{synopt:{cmd:e(Z)}}row vector of unit-level {it:z} values used by the upstream estimation{p_end}
+{synopt:{cmd:e(B_g_t)}}flattened influence function matrix B_{i,g,t}(z_r){p_end}
+{synopt:{cmd:e(G_g)}}group indicator matrix (n x K); G_{i,g} = 1 if unit {it:i} belongs to group {it:g}{p_end}
+{synopt:{cmd:e(mu_G_g)}}conditional mean E[G_g | Z = z_r] at the eval grid (R x K){p_end}
+{synopt:{cmd:e(Z)}}row vector of unit-level {it:z} values{p_end}
 {synopt:{cmd:e(dh_Y_wide)}}wide-format outcome matrix (n x T){p_end}
 {synopt:{cmd:e(dh_G_unit)}}row vector of unit-level treatment group assignments{p_end}
-{synopt:{cmd:e(dh_t_vals)}}row vector of distinct time-period values used by the upstream estimation{p_end}
+{synopt:{cmd:e(dh_t_vals)}}row vector of distinct time-period values{p_end}
 {synopt:{cmd:e(dh_gps_mat)}}stacked generalized propensity score fits by (g, unit){p_end}
 {synopt:{cmd:e(dh_or_mat)}}stacked outcome regression fits by (g, unit){p_end}
 

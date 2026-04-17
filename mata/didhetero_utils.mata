@@ -3,37 +3,6 @@ mata:
 // =============================================================================
 // didhetero_utils.mata
 // Utility functions for didhetero-stata
-//
-// Functions:
-//   1. didhetero_seq()            - Equally-spaced sequence generation
-//   2. didhetero_trapz()          - Trapezoidal rule numerical integration
-//   3. didhetero_quantile()       - Quantile calculation (Hyndman-Fan type 7)
-//   4. didhetero_mammen_weights() - Mammen wild bootstrap weights
-//   5. didhetero_analytical_cv()  - Analytical critical value
-//   6. didhetero_parse_xformula_locals() - Parse xformula() into resolved terms
-//   7. didhetero_unique_tokens()  - Remove duplicate xformula tokens, preserving order
-//   8. _didhetero_intersect()     - Set intersection (sorted)
-//   9. _didhetero_setdiff()       - Set difference (sorted)
-//  10. didhetero_period_ord()     - Ordinal position of a time label in t_vals
-//  11. didhetero_period_at()      - Time label at a given ordinal position
-//  12. didhetero_group_is_valid() - Check whether a group has a valid base period
-//  13. didhetero_time_is_valid()  - Check whether a time label is admissible
-//  14. didhetero_pair_in_domain() - Check whether a (g,t) pair is estimable
-//  15. didhetero_build_gteval()   - Build (g,t) evaluation point matrices
-//  16. didhetero_duplicate_gteval_pairs() - Format duplicate user (g,t) pairs
-//  17. didhetero_user_gteval_in_domain() - Check whether a user pair is estimable
-//  18. didhetero_validate_user_gteval() - Reject explicit gteval() outside domain
-//  19. didhetero_selectindex()    - Index selection (Stata <17 compat)
-//  20. didhetero_gen_z_supp()     - Z support grid generation (100 points)
-//  21. didhetero_init_arrays()    - Core estimation array initialization
-//  22. didhetero_init_core_arrays() - Core estimation array initialization (delayed)
-//  23. didhetero_prepare_data()   - Main data preparation (long->wide, struct)
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//     - Section 4.2.4 Eq. 21-22 (analytical critical value)
-//     - Section 4.2.4 (Mammen wild bootstrap)
-//   Sections 4.2.1–4.2.4 (preparation, integration, critical values, bootstrap)
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -47,7 +16,6 @@ mata:
 //   real rowvector of 1-based indices where v != 0
 //   Returns J(1, 0, .) (empty rowvector) if no nonzero elements
 //
-// Note: Replaces Stata 17+ selectindex() for backward compatibility
 // -----------------------------------------------------------------------------
 real rowvector didhetero_selectindex(real colvector v)
 {
@@ -462,7 +430,6 @@ string rowvector didhetero_unique_tokens(string scalar xformula)
 // Returns:
 //   real colvector of equispaced values
 //
-// Note: Uses Mata built-in rangen() for numerical consistency
 // -----------------------------------------------------------------------------
 real colvector didhetero_seq(real scalar from, real scalar to, real scalar length)
 {
@@ -472,7 +439,6 @@ real colvector didhetero_seq(real scalar from, real scalar to, real scalar lengt
     // Special case: single point
     if (length == 1) return(from)
     
-    // Use Mata built-in rangen for numerical consistency
     return(rangen(from, to, length))
 }
 
@@ -487,7 +453,6 @@ real colvector didhetero_seq(real scalar from, real scalar to, real scalar lengt
 // Returns:
 //   real scalar approximation of integral of y over x
 //
-// Paper ref: Numerical integration for IMSE bandwidth selection
 // -----------------------------------------------------------------------------
 real scalar didhetero_trapz(real colvector x, real colvector y)
 {
@@ -510,8 +475,7 @@ real scalar didhetero_trapz(real colvector x, real colvector y)
 
 // -----------------------------------------------------------------------------
 // didhetero_quantile()
-// Quantile function using Hyndman & Fan (1996) type=7 algorithm
-// (Hyndman & Fan type 7, the standard default in statistical software)
+// Quantile function using type-7 algorithm
 //
 // Args:
 //   x     - real colvector of data values (must be non-empty)
@@ -520,7 +484,7 @@ real scalar didhetero_trapz(real colvector x, real colvector y)
 // Returns:
 //   real vector of quantile values corresponding to probs
 //
-// Note: Type 7 continuous index: h = (n-1)*p + 1, with linear interpolation
+// Type 7 continuous index: h = (n-1)*p + 1, with linear interpolation
 // -----------------------------------------------------------------------------
 real vector didhetero_quantile(real colvector x, real vector probs)
 {
@@ -562,7 +526,7 @@ real vector didhetero_quantile(real colvector x, real vector probs)
 
 // -----------------------------------------------------------------------------
 // didhetero_mammen_weights()
-// Generate Mammen (1993) two-point wild bootstrap weights
+// Generate Mammen two-point wild bootstrap weights
 //
 // Args:
 //   n - number of weights to generate (must be >= 1)
@@ -570,10 +534,9 @@ real vector didhetero_quantile(real colvector x, real vector probs)
 // Returns:
 //   real colvector of bootstrap weights
 //
-// Note: Paper Section 4.2.4: kappa = (sqrt(5)+1)/2 (golden ratio)
-//       V* = 2-kappa w.p. kappa/sqrt(5), 1+kappa w.p. 1-kappa/sqrt(5)
-//       Moment properties: E[V]=1, Var[V]=1, E[(V-1)^3]=1
-//       Paper ref: Section 4.2.4 Eq. 23
+// kappa = (sqrt(5)+1)/2 (golden ratio)
+// V* = 2-kappa w.p. kappa/sqrt(5), 1+kappa w.p. 1-kappa/sqrt(5)
+// Moment properties: E[V]=1, Var[V]=1, E[(V-1)^3]=1
 // -----------------------------------------------------------------------------
 real colvector didhetero_mammen_weights(real scalar n)
 {
@@ -584,7 +547,6 @@ real colvector didhetero_mammen_weights(real scalar n)
     if (n < 1) _error("n must be a positive integer")
     
     // Golden ratio
-    // Paper Section 4.2.4: kappa = (sqrt(5) + 1) / 2
     kappa = (sqrt(5) + 1) / 2
     p_low = kappa / sqrt(5)
     
@@ -610,10 +572,8 @@ real colvector didhetero_mammen_weights(real scalar n)
 // Returns:
 //   real scalar critical value c_hat
 //
-// Note: Paper Eq. 21-22
-//       a_n^2 = 2*log((b-a)/h) + 2*log(sqrt(lambda)/(2*pi))
-//       c_hat = sqrt(a_n^2 - 2*log(log(1/sqrt(1-alpha))))
-//       Paper ref: Section 4.2.4 Eq. 21-22
+// a_n^2 = 2*log((b-a)/h) + 2*log(sqrt(lambda)/(2*pi))
+// c_hat = sqrt(a_n^2 - 2*log(log(1/sqrt(1-alpha))))
 // -----------------------------------------------------------------------------
 real scalar didhetero_analytical_cv(real scalar a, real scalar b,
                                      real scalar h, real scalar lambda,
@@ -626,10 +586,10 @@ real scalar didhetero_analytical_cv(real scalar a, real scalar b,
     if (b <= a) _error("b must be greater than a")
     if (alpha <= 0 | alpha >= 1) _error("alpha must be between 0 and 1 (exclusive)")
     
-    // Paper Eq. 21: a_n^2 = 2*log((b-a)/h) + 2*log(sqrt(lambda)/(2*pi))
+    // a_n^2 = 2*log((b-a)/h) + 2*log(sqrt(lambda)/(2*pi))
     a_n_sq = 2 * log((b - a) / h) + 2 * log(sqrt(lambda) / (2 * c("pi")))
     
-    // Paper Eq. 22: inner_log = log(log(1/sqrt(1-alpha)))
+    // inner_log = log(log(1/sqrt(1-alpha)))
     inner_log = log(log(1 / sqrt(1 - alpha)))
     
     // Boundary protection: fallback to normal quantile when a_n^2 is too small
@@ -637,7 +597,7 @@ real scalar didhetero_analytical_cv(real scalar a, real scalar b,
         c_hat = invnormal(1 - alpha/2)
     }
     else {
-        // Paper Eq. 22: c_hat = sqrt(a_n_sq - 2*inner_log)
+        // c_hat = sqrt(a_n_sq - 2*inner_log)
         c_hat = sqrt(a_n_sq - 2 * inner_log)
     }
     
@@ -853,8 +813,6 @@ real scalar didhetero_pair_in_domain(
 //   Fills data.supp_g, data.supp_t, data.period1, data.geval, data.teval,
 //   data.gbar, data.gteval, data.num_gteval
 //   May set uniformall = 0 when num_gteval == 1
-//
-// Paper ref: Section 2 (Setup), Section 4.2.1 (Estimation procedure)
 // -----------------------------------------------------------------------------
 void didhetero_build_gteval(
     struct DidHeteroData scalar data,
@@ -873,7 +831,7 @@ void didhetero_build_gteval(
     supp_t = sort(uniqrows(data.t_vals), 1)
     period1 = supp_t[1]
 
-    // Guard the paper's support restriction even if callers bypass ado-level
+    // Guard the support restriction even if callers bypass ado-level
     // validation. Treated cohorts must start strictly after the first period.
     if (sum((supp_g :!= 0) :& (supp_g :<= period1)) > 0) {
         _error(198,
@@ -908,7 +866,7 @@ void didhetero_build_gteval(
         _error("No valid time periods found after applying anticipation filter")
     }
     
-    // === Step 4: gbar computation (Paper Section 2) ===
+    // === Step 4: gbar computation ===
     if (!has_never) {
         gbar = max(supp_g)
     }
@@ -1090,8 +1048,6 @@ void didhetero_validate_user_gteval(
 //
 // Returns:
 //   real colvector of 100 equally-spaced points from min(Z) to max(Z)
-//
-// Paper ref: Section 4.2.5 (Bandwidth selection)
 // -----------------------------------------------------------------------------
 real colvector didhetero_gen_z_supp(real colvector Z)
 {
@@ -1111,11 +1067,9 @@ real colvector didhetero_gen_z_supp(real colvector Z)
 //
 // Side effects:
 //   Populates d.A_g_t, d.B_g_t, d.G_g, d.mu_G_g, d.mu_E_g_t, d.mu_F_g_t
-//
-// Paper ref: Section 4.2.1 (Three-step estimation procedure)
-//       A_g_t, B_g_t are pointer arrays (1 x num_gteval), each n x num_zeval
-//       G_g is n x num_gteval
-//       mu_G_g, mu_E_g_t, mu_F_g_t are num_zeval x num_gteval
+//   A_g_t, B_g_t are pointer arrays (1 x num_gteval), each n x num_zeval
+//   G_g is n x num_gteval
+//   mu_G_g, mu_E_g_t, mu_F_g_t are num_zeval x num_gteval
 // -----------------------------------------------------------------------------
 void didhetero_init_arrays(struct DidHeteroData scalar d,
                            real scalar n,
@@ -1146,7 +1100,6 @@ void didhetero_init_arrays(struct DidHeteroData scalar d,
 // -----------------------------------------------------------------------------
 // didhetero_get_uniformall()
 // Return the effective uniformall flag stored in the global data struct.
-// This is a test helper to verify propagation of the single (g,t) override.
 // -----------------------------------------------------------------------------
 real scalar didhetero_get_uniformall()
 {
@@ -1210,8 +1163,7 @@ real colvector _didhetero_read_panel_id(string scalar idvar)
 // Returns:
 //   struct DidHeteroData scalar with all fields populated
 //
-// Paper ref: Section 2 (Setup), Section 4.2.1 (Estimation procedure)
-//       Data must be pre-sorted by (id, time) via _didhetero_validate.ado
+// Note: Data must be pre-sorted by (id, time) via _didhetero_validate.ado
 // -----------------------------------------------------------------------------
 struct DidHeteroData scalar didhetero_prepare_data(
     string scalar depvar,
@@ -1263,9 +1215,7 @@ struct DidHeteroData scalar didhetero_prepare_data(
     // === Step 4: G vector (n x 1) ===
     // Extract one value per id (time-invariant, take first period)
     // Indices: 1, 1+T_num, 1+2*T_num, ..., 1+(n-1)*T_num
-    // Note: range(1, n*T_num, T_num) fails when (n*T_num-1) is not divisible
-    //       by T_num, because Mata's range() rounds up the point count.
-    //       Use explicit vector arithmetic instead.
+    // range(1, n*T_num, T_num) rounds up point count; use explicit arithmetic
     period1_idx = (0::(n-1)) :* T_num :+ 1
     G = G_long[period1_idx]
 
@@ -1345,8 +1295,6 @@ struct DidHeteroData scalar didhetero_prepare_data(
 //
 // Side effects:
 //   Populates d.A_g_t, d.B_g_t, d.G_g, d.mu_G_g, d.mu_E_g_t, d.mu_F_g_t
-//
-// Paper ref: Section 4.2.1 (Three-step estimation procedure)
 // -----------------------------------------------------------------------------
 void didhetero_init_core_arrays(struct DidHeteroData scalar d,
                                 real scalar num_gteval)
@@ -1381,10 +1329,6 @@ void didhetero_init_core_arrays(struct DidHeteroData scalar d,
 // Wrapper called from catt_gt.ado to initialize data and kernel structs.
 // Reads Stata locals set by catt_gt.ado, calls prepare_data and kernel_consts,
 // and stores results as Mata external globals.
-//
-// This function exists because Stata's inline mata { } blocks inside ado files
-// do NOT support the `external` keyword. By compiling this function in a .mata
-// file, we can properly declare external structs.
 //
 // Side effects:
 //   Creates external globals _dh_data (DidHeteroData) and _dh_kc (DidHeteroKernelConsts)
@@ -1435,7 +1379,7 @@ void didhetero_init_from_ado()
     _dh_data.const_B2 = _dh_kc.const_B2
     _dh_data.lambda   = _dh_kc.lambda
     
-    // Select const_V based on porder (Paper Section 4.2.2)
+    // Select const_V based on porder
     _porder = strtoreal(st_local("porder"))
     _dh_data.const_V = (_porder == 1) * _dh_kc.const_V1 + (_porder == 2) * _dh_kc.const_V2
 }

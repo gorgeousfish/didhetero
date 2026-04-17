@@ -1,11 +1,10 @@
 // =============================================================================
-// didhetero_aggte.mata
-// Aggregation module for didhetero-stata (aggte)
+// Mata aggregation module for heterogeneous treatment effect estimation
 //
-// Implements (g, t, eval) triple construction and filtering for four
-// aggregation types: dynamic, group, calendar, simple.
-//
-// Reference: Imai, Qin, Yanagi (2025), Section 5 and Appendix A
+// This module implements the construction and filtering of (g, t, eval) triples
+// for four aggregation types: dynamic, group, calendar, and simple. The aggregation
+// combines conditional average treatment effects (CATT) across groups (g),
+// time periods (t), and evaluation points (eval).
 // =============================================================================
 
 mata:
@@ -13,15 +12,16 @@ mata:
 // -----------------------------------------------------------------------------
 // _gteeval_lt_gbar()
 //
-// Helper: check val < gbar, treating gbar == . (missing) as infinity.
-// In Mata, `val < .` returns missing (not 0 or 1), so this wrapper is needed.
+// Comparison helper treating missing gbar as infinity. In Mata, the expression
+// val < . evaluates to missing rather than 1; this function ensures a binary
+// return value.
 //
-// Parameters:
-//   val  - value to compare
-//   gbar - upper bound (. for infinity)
+// Arguments:
+//   val  - scalar value to compare
+//   gbar - upper bound (missing denotes infinity)
 //
 // Returns:
-//   1 if val < gbar (or gbar is missing), 0 otherwise
+//   1 if val < gbar or gbar is missing; 0 otherwise
 // -----------------------------------------------------------------------------
 real scalar _gteeval_lt_gbar(real scalar val, real scalar gbar)
 {
@@ -32,9 +32,8 @@ real scalar _gteeval_lt_gbar(real scalar val, real scalar gbar)
 // -----------------------------------------------------------------------------
 // _aggte_time_support_from_gteval()
 //
-// Build the ordered time support implicit in a gteval matrix. The upstream
-// CATT layer already enforces a common balanced panel support, so the union of
-// g and t labels is sufficient to recover the period index used by the paper.
+// Construct the ordered time support from the (g, t) pairs in gteval. Returns
+// the sorted union of all unique group and time period values.
 // -----------------------------------------------------------------------------
 real colvector _aggte_time_support_from_gteval(real matrix gteval)
 {
@@ -53,8 +52,8 @@ real colvector _aggte_time_support_from_gteval(real matrix gteval)
 // -----------------------------------------------------------------------------
 // _aggte_dynamic_event_time()
 //
-// Convert raw time labels into the period-index event time defined in the
-// paper, namely the ordinal distance between g and t on the ordered support.
+// Compute the event time as the ordinal distance between group adoption time
+// g and evaluation period t on the ordered time support.
 // -----------------------------------------------------------------------------
 real scalar _aggte_dynamic_event_time(
     real scalar g0,
@@ -77,24 +76,21 @@ real scalar _aggte_dynamic_event_time(
 // -----------------------------------------------------------------------------
 // didhetero_build_gteeval()
 //
-// Build the (g, t, eval) triple matrix for aggregation.
-// Filters gteval pairs according to the aggregation type and eval points.
+// Construct the (g, t, eval) triple matrix for aggregation by filtering (g, t)
+// pairs according to aggregation type and evaluation points. For non-dynamic
+// aggregation types, pre-filters to retain only post-treatment periods (t - g >= 0).
+// Then for each (g, t) pair and evaluation point, applies type-specific inclusion
+// criteria.
 //
-// For non-dynamic types, pre-filters to keep only post-treatment periods
-// (t - g >= 0). Then for each (g,t) pair and each eval point, checks
-// type-specific conditions to determine inclusion.
-//
-// Paper ref: Section 5, aggregation triplet filtering.
-//
-// Parameters:
-//   gteval    - K x 2 matrix of (g, t) pairs
-//   gbar      - upper bound for control group (. for infinity)
-//   type      - aggregation type: "dynamic", "group", "calendar", "simple"
-//   eval_pts  - column vector of eval values; J(1,1,.) for "simple"
+// Arguments:
+//   gteval   - K x 2 matrix of (g, t) pairs
+//   gbar     - upper bound for control group (missing denotes infinity)
+//   type     - aggregation type: "dynamic", "group", "calendar", or "simple"
+//   eval_pts - column vector of evaluation points (missing scalar for "simple")
 //
 // Returns:
-//   M x 3 matrix of (g, t, eval) triples satisfying the filtering conditions.
-//   Returns J(0, 3, .) if no triples match.
+//   M x 3 matrix of (g, t, eval) triples satisfying inclusion conditions,
+//   or J(0, 3, .) if no triples match
 // -----------------------------------------------------------------------------
 real matrix didhetero_build_gteeval(
     real matrix gteval,
@@ -107,14 +103,13 @@ real matrix didhetero_build_gteeval(
     real scalar     num_gt, num_eval, id_gt, id_eval
     real scalar     g0, t0, e0, i, dyn_e, t_ord, gbar_ord
 
-    // --- Step 0: Input validation ---
+    // Input validation
     if (type != "dynamic" & type != "group" &
         type != "calendar" & type != "simple") {
         _error(3498, "invalid aggregation type: " + type)
     }
 
-    // --- Step 1: Pre-filter for non-dynamic types (Section 2) ---
-    // Exclude pre-treatment periods (t - g < 0) for group/calendar/simple
+    // Pre-filter: exclude pre-treatment periods (t - g < 0) for group/calendar/simple
     if (type != "dynamic") {
         keep = J(rows(gteval), 1, 0)
         for (i = 1; i <= rows(gteval); i++) {
@@ -141,12 +136,12 @@ real matrix didhetero_build_gteeval(
         }
     }
 
-    // --- Step 2: Initialize ---
+    // Initialize
     num_gt   = rows(gteval0)
     num_eval = rows(eval_pts)
     all_gteeval = J(0, 3, .)
 
-    // --- Step 3: Build triples by nested loop (Section 5; Appendix A) ---
+    // Build triples by nested loop over (g,t) pairs and evaluation points
     for (id_gt = 1; id_gt <= num_gt; id_gt++) {
 
         g0 = gteval0[id_gt, 1]
@@ -156,7 +151,7 @@ real matrix didhetero_build_gteeval(
 
             e0 = eval_pts[id_eval]
 
-            // Section 5: dynamic
+            // Dynamic aggregation: select pairs matching event time
             if (type == "dynamic") {
                 dyn_e = _aggte_dynamic_event_time(
                     g0, t0, dyn_support, "didhetero_build_gteeval()")
@@ -165,19 +160,19 @@ real matrix didhetero_build_gteeval(
                     all_gteeval = all_gteeval \ (g0, t0, e0)
                 }
             }
-            // Section 5: group
+            // Group aggregation: select pairs matching group identifier
             else if (type == "group") {
                 if (g0 == e0 & t0 >= e0 & _gteeval_lt_gbar(t0, gbar)) {
                     all_gteeval = all_gteeval \ (g0, t0, e0)
                 }
             }
-            // Section 5: calendar
+            // Calendar aggregation: select pairs matching calendar time
             else if (type == "calendar") {
                 if (g0 <= e0 & t0 == e0) {
                     all_gteeval = all_gteeval \ (g0, t0, e0)
                 }
             }
-            // Section 5: simple
+            // Simple aggregation: select all post-treatment pairs
             else if (type == "simple") {
                 if (g0 <= t0 & _gteeval_lt_gbar(t0, gbar)) {
                     all_gteeval = all_gteeval \ (g0, t0, e0)
@@ -192,23 +187,20 @@ real matrix didhetero_build_gteeval(
 // -----------------------------------------------------------------------------
 // didhetero_aggte_weights()
 //
-// Compute aggregation weights for a given eval point.
-// Implements weight calculation for dynamic/group/calendar/simple types.
+// Compute aggregation weights for a given evaluation point. For dynamic,
+// calendar, and simple aggregation, weights are proportional to the conditional
+// group density: w_{g,t}(z_r) = mu_G_g(z_r) / sum(mu_G_g(z_r)). For group
+// aggregation, weights are uniform: w_{g,t} = 1 / T_post(g').
 //
-// For dynamic/calendar/simple: w_{g,t}(z_r) = mu_G_g(z_r) / sum(mu_G_g(z_r))
-// For group: w_{g,t} = 1 / T_post(g')
+// Arguments:
+//   mu_G_g_sub   - R x num_gte conditional group density submatrix
+//   gteeval      - M x 3 matrix of (g, t, eval) triples
+//   type         - aggregation type
+//   gbar         - upper bound for control group (missing denotes infinity)
+//   num_zeval    - number of evaluation points R
+//   num_gte      - number of (g,t) pairs
 //
-// Paper ref: Section 5, aggregation weight computation.
-//
-// Parameters:
-//   mu_G_g_sub  - R x num_gte conditional group density submatrix
-//   gteeval     - M x 3 triple matrix (g, t, eval) for current eval point
-//   type        - aggregation type: "dynamic", "group", "calendar", "simple"
-//   gbar        - upper bound for control group (. for infinity)
-//   num_zeval   - number of evaluation points R
-//   num_gte     - number of (g,t) pairs for current eval point
-//
-// Returns (by reference):
+// Outputs (passed by reference):
 //   aggte_weight - R x num_gte weight matrix
 //   aggte_kappa  - R x 1 normalization constant
 // -----------------------------------------------------------------------------
@@ -225,31 +217,31 @@ void didhetero_aggte_weights(
     real colvector mu_rowsum
     real scalar k, id_gte, e1, T_post, j
 
-    // --- Input validation ---
+    // Input validation
     if (type != "dynamic" & type != "group" &
         type != "calendar" & type != "simple") {
         _error(3498, "invalid aggregation type: " + type)
     }
 
-    // --- Initialize outputs (Section 5) ---
+    // Initialize outputs
     aggte_weight = J(num_zeval, num_gte, .)
     aggte_kappa = J(num_zeval, 1, .)
 
-    // --- Precompute row sums of mu_G_g_sub ---
+    // Precompute row sums of mu_G_g_sub
     mu_rowsum = J(num_zeval, 1, 0)
     for (k = 1; k <= num_gte; k++) {
         mu_rowsum = mu_rowsum + mu_G_g_sub[., k]
     }
 
-    // --- Weight calculation main loop (Section 5) ---
+    // Weight calculation main loop
     for (id_gte = 1; id_gte <= num_gte; id_gte++) {
 
         if (type == "dynamic" | type == "calendar") {
-            // Section 5: conditional group probability weights
+            // Conditional group probability weights
             aggte_weight[., id_gte] = mu_G_g_sub[., id_gte] :/ mu_rowsum
         }
         else if (type == "group") {
-            // Section 5: known uniform weights 1/T_post
+            // Known uniform weights 1/T_post
             e1 = gteeval[id_gte, 3]
             T_post = 0
             for (j = 1; j <= rows(gteeval); j++) {
@@ -266,12 +258,12 @@ void didhetero_aggte_weights(
             }
         }
         else if (type == "simple") {
-            // Section 5: same formula as dynamic/calendar
+            // Same formula as dynamic/calendar
             aggte_weight[., id_gte] = mu_G_g_sub[., id_gte] :/ mu_rowsum
         }
     }
 
-    // --- Compute kappa = rowSums(aggte_weight) (Section 5) ---
+    // Compute kappa = rowSums(aggte_weight)
     aggte_kappa = J(num_zeval, 1, 0)
     for (k = 1; k <= num_gte; k++) {
         aggte_kappa = aggte_kappa + aggte_weight[., k]
@@ -282,12 +274,10 @@ void didhetero_aggte_weights(
 // didhetero_aggte_xi()
 //
 // Compute influence functions xi_{i,g,t} for weight estimation uncertainty.
-// Implements xi calculation for dynamic/calendar (2-term), group (zero),
-// and simple (3-term) types.
+// The functional form depends on the aggregation type: two-term for dynamic
+// and calendar, zero for group, and three-term for simple aggregation.
 //
-// Paper ref: Section 5, weight influence function xi computation.
-//
-// Parameters:
+// Arguments:
 //   G_g_sub      - n x num_gte group indicator submatrix
 //   mu_G_g_sub   - R x num_gte conditional group density submatrix
 //   aggte_weight - R x num_gte weight matrix
@@ -295,10 +285,10 @@ void didhetero_aggte_weights(
 //   type         - aggregation type
 //   n            - sample size
 //   num_zeval    - number of evaluation points R
-//   num_gte      - number of (g,t) pairs for current eval point
+//   num_gte      - number of (g,t) pairs
 //
-// Returns (by reference):
-//   xi_g_t - pointer vector of length num_gte, each -> n x R matrix
+// Outputs (passed by reference):
+//   xi_g_t - pointer vector of length num_gte, each pointing to an n x R matrix
 // -----------------------------------------------------------------------------
 void didhetero_aggte_xi(
     real matrix G_g_sub,
@@ -320,23 +310,23 @@ void didhetero_aggte_xi(
         xi_g_t[k] = &(J(n, num_zeval, 0))
     }
 
-    // Precompute mu_rowsum = sum(mu_G_g_sub, cols), num_zeval x 1
+    // Precompute mu_rowsum = sum(mu_G_g_sub, cols)
     mu_rowsum = J(num_zeval, 1, 0)
     for (k = 1; k <= num_gte; k++) {
         mu_rowsum = mu_rowsum + mu_G_g_sub[., k]
     }
 
-    // ---- group type: xi = 0 (Section 5) ----
+    // Group type: xi = 0 (weights are deterministic)
     if (type == "group") {
         return
     }
 
-    // ---- Input validation ----
+    // Input validation
     if (type != "dynamic" & type != "calendar" & type != "simple") {
         _error(3498, "invalid aggregation type for xi: " + type)
     }
 
-    // ---- dynamic / calendar type: two-term formula (Section 5; Appendix A) ----
+    // Dynamic / calendar type: two-term formula
     if (type == "dynamic" | type == "calendar") {
 
         for (i = 1; i <= n; i++) {
@@ -349,10 +339,10 @@ void didhetero_aggte_xi(
 
             for (id_gte = 1; id_gte <= num_gte; id_gte++) {
 
-                // Term 1: G_{i,g} / Sigma_mu  (R x 1)
+                // Term 1: G_{i,g} / Sigma_mu
                 term1 = J(num_zeval, 1, G_g_sub[i, id_gte]) :/ mu_rowsum
 
-                // Term 2: mu_{G_g} / Sigma_mu^2 * sum(G_{i,g'})  (R x 1)
+                // Term 2: mu_{G_g} / Sigma_mu^2 * sum(G_{i,g'})
                 term2 = mu_G_g_sub[., id_gte] :/ (mu_rowsum :^ 2) :* sum_G_i
 
                 // xi_{i,g,t}(z_r) = Term1 - Term2
@@ -361,7 +351,7 @@ void didhetero_aggte_xi(
         }
     }
 
-    // ---- simple type: three-term formula (Section 5; Appendix A) ----
+    // Simple type: three-term formula
     else if (type == "simple") {
 
         for (i = 1; i <= n; i++) {
@@ -389,7 +379,6 @@ void didhetero_aggte_xi(
                 term2 = mu_G_g_sub[., id_gte] :/ (aggte_kappa :* (mu_rowsum :^ 2)) :* sum_G_i
 
                 // Term 3: mu_{G_g} / (kappa * Sigma_mu)^2 * term3_inner
-                // Note: denominator is (kappa * Sigma_mu)^2, the entire product squared
                 term3 = mu_G_g_sub[., id_gte] :/ ((aggte_kappa :* mu_rowsum) :^ 2) :* term3_inner
 
                 // xi^{OW}_{i,g,t}(z_r) = Term1 - Term2 - Term3
@@ -402,22 +391,19 @@ void didhetero_aggte_xi(
 // -----------------------------------------------------------------------------
 // didhetero_aggte_J()
 //
-// Compute aggregated influence function J_i and point estimate.
-// Combines CATT influence functions B_{i,g,t} with weight influence
-// functions xi_{i,g,t} to form the total influence function J_i.
+// Compute the aggregated influence function J_i and point estimate by combining
+// CATT influence functions B_{i,g,t} with weight influence functions xi_{i,g,t}.
 //
-// Paper ref: Section 5, total influence function J construction.
-//
-// Parameters:
-//   B_g_t_sub    - pointer vector of length num_gte, each -> n x R
-//   xi_g_t       - pointer vector of length num_gte, each -> n x R
+// Arguments:
+//   B_g_t_sub    - pointer vector of length num_gte, each pointing to n x R
+//   xi_g_t       - pointer vector of length num_gte, each pointing to n x R
 //   aggte_weight - R x num_gte weight matrix
 //   catt         - R x num_gte CATT point estimate matrix
 //   n            - sample size
 //   num_zeval    - number of evaluation points R
 //   num_gte      - number of (g,t) pairs
 //
-// Returns (by reference):
+// Outputs (passed by reference):
 //   J          - n x R aggregated influence function matrix
 //   aggte_est  - R x 1 aggregated point estimate vector
 // -----------------------------------------------------------------------------
@@ -439,23 +425,20 @@ void didhetero_aggte_J(
     J = J(n, num_zeval, 0)
     aggte_est = J(num_zeval, 1, 0)
 
-    // Step 1: Compute aggregated point estimate (Section 5, Eq. 26)
-    // aggte_est = rowSums(catt * aggte_weight)
+    // Compute aggregated point estimate
     for (k = 1; k <= num_gte; k++) {
         aggte_est = aggte_est + catt[., k] :* aggte_weight[., k]
     }
 
-    // Step 2: Compute J_i by summing over all (g,t) pairs (Section 5, Eq. 27)
+    // Compute J_i by summing over all (g,t) pairs
     for (id_gte = 1; id_gte <= num_gte; id_gte++) {
 
         for (i = 1; i <= n; i++) {
 
-            // J_temp contribution for (g,t) pair id_gte:
-            // J_temp[i, , id_gte] = w[, id_gte] * B[i, , id_gte] +
-            //                       catt[, id_gte] * xi[i, , id_gte]
+            // Contribution for (g,t) pair id_gte
             J_temp_row = aggte_weight[., id_gte] :* (*B_g_t_sub[id_gte])[i, .]' + catt[., id_gte] :* (*xi_g_t[id_gte])[i, .]'
 
-            // Accumulate into J (Section 5, Eq. 27)
+            // Accumulate into J
             J[i, .] = J[i, .] + J_temp_row'
         }
     }
@@ -464,7 +447,7 @@ void didhetero_aggte_J(
 // -----------------------------------------------------------------------------
 // _aggte_quantile_type7()
 //
-// Compute the type-7 sample quantile (Hyndman & Fan, 1996).
+// Compute the type-7 sample quantile using linear interpolation.
 // -----------------------------------------------------------------------------
 real scalar _aggte_quantile_type7(real colvector x_sorted, real scalar prob)
 {
@@ -485,8 +468,8 @@ real scalar _aggte_quantile_type7(real colvector x_sorted, real scalar prob)
 // -----------------------------------------------------------------------------
 // _aggte_lprobust_bw()
 //
-// Local copy of the lprobust bandwidth primitive used only by aggte
-// SE helpers. This avoids relying on an outdated compiled mlib implementation.
+// Bandwidth selection helper for aggregation standard error computation.
+// Implements the lprobust bandwidth algorithm for local polynomial regression.
 // -----------------------------------------------------------------------------
 real scalar _aggte_lprobust_bw(
     real colvector Y,
@@ -662,8 +645,8 @@ real scalar _aggte_lprobust_bw(
 // -----------------------------------------------------------------------------
 // _aggte_lpbw_mse_details_odd()
 //
-// Exact pointwise MSE-DPI details for the odd branch used in aggte SE.
-// This implements the p=1, deriv=0 bandwidth selectors for aggte SE estimation.
+// Compute pointwise MSE-DPI bandwidth details for the odd polynomial order case.
+// Used in aggregation standard error estimation with p=1 and deriv=0.
 // -----------------------------------------------------------------------------
 void _aggte_lpbw_mse_details_odd(
     real colvector Y,
@@ -781,7 +764,7 @@ void _aggte_lpbw_mse_details_odd(
 // -----------------------------------------------------------------------------
 // _aggte_lpbwselect_mse_odd()
 //
-// Pointwise MSE-DPI bandwidths for the odd branch used in aggte SE.
+// Compute pointwise MSE-DPI bandwidths for the odd polynomial order case.
 // -----------------------------------------------------------------------------
 real colvector _aggte_lpbwselect_mse_odd(
     real colvector Y,
@@ -809,7 +792,7 @@ real colvector _aggte_lpbwselect_mse_odd(
 // -----------------------------------------------------------------------------
 // _aggte_lpbwselect_imse_odd()
 //
-// Common IMSE-DPI bandwidth for the odd branch used in aggte SE.
+// Compute the common IMSE-DPI bandwidth for the odd polynomial order case.
 // -----------------------------------------------------------------------------
 real scalar _aggte_lpbwselect_imse_odd(
     real colvector Y,
@@ -868,25 +851,23 @@ real scalar _aggte_lpbwselect_imse_odd(
 // -----------------------------------------------------------------------------
 // didhetero_aggte_bw_pass1()
 //
-// Compute IMSE-optimal bandwidth for aggregated parameter (Pass 1).
-// Applies the same IMSE-DPI pipeline as the CATT-level BW selection but on J_i instead of B_{i,g,t}.
-// Supports IMSE1, IMSE2, and US1 bandwidth selection methods.
+// Compute the IMSE-optimal bandwidth for the aggregated parameter (Pass 1).
+// Applies the IMSE-DPI pipeline to the aggregated influence function J_i,
+// supporting IMSE1, IMSE2, and US1 bandwidth selection methods.
 //
-// Paper ref: Section 5, aggregation bandwidth selection.
-//
-// Parameters:
+// Arguments:
 //   J          - n x R aggregated influence function matrix
 //   Z          - n x 1 covariate vector
 //   zeval      - R x 1 sorted evaluation points
 //   kd0_Z      - R x 1 kernel density estimates at zeval
 //   kd1_Z      - R x 1 kernel density derivative estimates at zeval
 //   n          - sample size
-//   bwselect   - "IMSE1", "IMSE2", or "US1"
+//   bwselect   - bandwidth selection method: "IMSE1", "IMSE2", or "US1"
 //   kernel     - kernel type ("epa" or "gau")
-//   uniformall - 1 for common bandwidth (unused; IMSE integration is global)
+//   uniformall - 1 for common bandwidth
 //
 // Returns:
-//   scalar bandwidth (or . on failure)
+//   scalar bandwidth, or missing on failure
 // -----------------------------------------------------------------------------
 real scalar didhetero_aggte_bw_pass1(
     real matrix J,
@@ -910,21 +891,21 @@ real scalar didhetero_aggte_bw_pass1(
     real scalar mu_J_3_bw, mu_J_3, mu_J_4_bw, mu_J_4
     real scalar int_bias, int_var, h_opt, h_max
 
-    // --- Input validation ---
+    // Input validation
     if (bwselect != "IMSE1" & bwselect != "IMSE2" & bwselect != "US1") {
         _error(3498, "invalid bwselect for aggte Pass 1: " + bwselect)
     }
 
     R_eval = rows(zeval)
 
-    // Edge case: need at least 2 eval points for trapz
+    // Need at least 2 evaluation points for trapezoidal integration
     if (R_eval < 2) return(.)
 
-    // --- Get kernel constants ---
+    // Get kernel constants
     _didhetero_kernel_constants(kernel, I_2_K1, I_4_K1, I_6_K1,
                                 I_0_K2, I_2_K2, I_4_K2, I_6_K2)
 
-    // --- Compute derived constants ---
+    // Compute derived constants
     const_V1 = I_0_K2
 
     if (bwselect == "IMSE2") {
@@ -934,15 +915,14 @@ real scalar didhetero_aggte_bw_pass1(
         if (abs(cb_den) < 1e-30) return(.)
         C_B_LQ = cb_num / cb_den
 
-        // C_{V2} = (I_4^2*I_0_K2 - 2*I_2*I_4*I_2_K2 + I_2^2*I_4_K2)
-        //          / (I_4 - I_2^2)^2
+        // C_{V2} = (I_4^2*I_0_K2 - 2*I_2*I_4*I_2_K2 + I_2^2*I_4_K2) / (I_4 - I_2^2)^2
         cv_num = I_4_K1^2 * I_0_K2 - 2 * I_2_K1 * I_4_K1 * I_2_K2 + I_2_K1^2 * I_4_K2
         cv_den = (I_4_K1 - I_2_K1^2)^2
         if (abs(cv_den) < 1e-30) return(.)
         const_V2 = cv_num / cv_den
     }
 
-    // --- Select const_V by bwselect (NOT porder) ---
+    // Select const_V by bwselect
     if (bwselect == "IMSE1" | bwselect == "US1") {
         const_V = const_V1
     }
@@ -950,10 +930,10 @@ real scalar didhetero_aggte_bw_pass1(
         const_V = const_V2
     }
 
-    // --- Initialize bias vector ---
+    // Initialize bias vector
     mathcal_B = J(R_eval, 1, .)
 
-    // === Bias estimation loop ===
+    // Bias estimation loop
     for (r = 1; r <= R_eval; r++) {
 
         y_r = J[., r]
@@ -963,7 +943,7 @@ real scalar didhetero_aggte_bw_pass1(
 
         if (bwselect == "IMSE1" | bwselect == "US1") {
 
-            // --- IMSE1/US1 bias: 2nd derivative (p=3, deriv=2) ---
+            // IMSE1/US1 bias: 2nd derivative (p=3, deriv=2)
 
             // MSE-DPI bandwidth for mu_J^{(2)}
             mu_J_2_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
@@ -983,15 +963,13 @@ real scalar didhetero_aggte_bw_pass1(
             if (mu_J_2 >= .) continue
 
             // IMSE1 bias for LLR: mathcal_B[r] = mu^{(2)} * I_{2,K} / 2
-            // Paper eq.(F.18): Bias[theta^LL(z)|Z] ~ h^2 * (I_{2,K}/2) * mu_J^{(2)}(z)
-            // Paper eq.(F.18); matches the CATT-level IMSE bias formula
             mathcal_B[r] = mu_J_2 * I_2_K1 / 2
         }
         else {
 
-            // --- IMSE2 bias: 3rd and 4th derivatives ---
+            // IMSE2 bias: 3rd and 4th derivatives
 
-            // 3rd derivative: MSE-DPI bw (p=4, deriv=3) → LPR
+            // 3rd derivative: MSE-DPI bw (p=4, deriv=3) -> LPR
             mu_J_3_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
                                 zeval[r..r], 4, 3, kernel)
             mu_J_3_bw = mu_J_3_bw_vec[1]
@@ -1007,7 +985,7 @@ real scalar didhetero_aggte_bw_pass1(
 
             if (mu_J_3 >= .) continue
 
-            // 4th derivative: MSE-DPI bw (p=5, deriv=4) → LPR
+            // 4th derivative: MSE-DPI bw (p=5, deriv=4) -> LPR
             mu_J_4_bw_vec = _didhetero_lpbwselect_mse(y_r, Z,
                                 zeval[r..r], 5, 4, kernel)
             mu_J_4_bw = mu_J_4_bw_vec[1]
@@ -1023,36 +1001,33 @@ real scalar didhetero_aggte_bw_pass1(
 
             if (mu_J_4 >= .) continue
 
-            // IMSE2 bias: (1/(24*f(z))) * (2*mu3*f'(z) + mu4*f(z)) * C_B_LQ
+            // IMSE2 bias formula
             mathcal_B[r] = (1 / (24 * kd0_Z[r])) * (2 * mu_J_3 * kd1_Z[r] + mu_J_4 * kd0_Z[r]) * C_B_LQ
         }
     }
 
-    // === Variance estimation via shared function ===
+    // Variance estimation
     _didhetero_bwselect_var_est(J, Z, zeval, kd0_Z, const_V,
                                            kernel, mathcal_V)
 
-    // === Trapezoidal integration ===
+    // Trapezoidal integration
     int_bias = _didhetero_trapz(zeval, mathcal_B :^ 2)
     int_var  = _didhetero_trapz(zeval, mathcal_V)
 
-    // === Edge cases ===
+    // Edge cases
     h_max = (max(Z) - min(Z)) / 2
 
     if (int_bias >= . | int_bias < 1e-20) return(h_max)
     if (int_var >= . | int_var <= 0) return(.)
 
-    // === Bandwidth formula ===
+    // Bandwidth formula
     if (bwselect == "IMSE1") {
-        // h = (int_V / (4 * int_B))^(1/5) * n^(-1/5)
         h_opt = (int_var / (4 * int_bias))^(1/5) * n^(-1/5)
     }
     else if (bwselect == "IMSE2") {
-        // h = (int_V / (8 * int_B))^(1/9) * n^(-1/9)
         h_opt = (int_var / (8 * int_bias))^(1/9) * n^(-1/9)
     }
     else if (bwselect == "US1") {
-        // h = (int_V / (4 * int_B))^(1/5) * n^(-2/7)
         h_opt = (int_var / (4 * int_bias))^(1/5) * n^(-2/7)
     }
 
@@ -1065,47 +1040,33 @@ real scalar didhetero_aggte_bw_pass1(
 // didhetero_aggte_se()
 //
 // Compute standard errors and analytical uniform confidence bands for
-// aggregated treatment effect estimates.
+// aggregated treatment effect estimates. The variance estimation pipeline
+// consists of: (1) bandwidth selection for the residual mean, (2) local
+// polynomial regression of the influence function on the covariate,
+// (3) residual computation and variance estimation, and (4) standard
+// error calculation. Analytical uniform confidence bands are constructed
+// using the critical value formula for suprema of Gaussian processes.
 //
-// Implements the variance estimation pipeline for aggte:
-//   For each evaluation point z_r:
-//     Step 1: IMSE-DPI bandwidth for residual mean of J_i(z_r) (p=1)
-//     Step 2: LPR estimate of E[J_i | Z_i] at all observations (p=1)
-//     Step 3a: Residuals U = J - mu_J_hat
-//     Step 3b: MSE-DPI bandwidth for U^2 (p=1, eval=zeval[r])
-//     Step 3c: LPR of U^2 at zeval[r] (p=1)
-//     Step 4: V_hat[r] = const_V * sigma2 / kd0_Z[r]
-//     SE[r] = sqrt(V_hat[r] / (n * bw))
-//
-// Then analytical UCB:
-//   c_hat = analytical critical value (CCK 2014)
-//   ci1_lower = aggte_est - c_hat * se
-//   ci1_upper = aggte_est + c_hat * se
-//
-// Paper ref: Section 5, aggregation SE and analytical UCB.
-//
-// Parameters:
+// Arguments:
 //   J          - n x num_zeval aggregated influence function matrix
 //   aggte_est  - num_zeval x 1 aggregated point estimate vector
 //   Z          - n x 1 covariate vector
 //   zeval      - num_zeval x 1 evaluation points
 //   Z_supp     - support grid for IMSE-DPI bandwidth selection
-//   kd0_Z      - num_zeval x 1 kernel density estimates f_hat(z_r)
-//   bw         - scalar, bandwidth for current eval point
-//   n          - scalar, sample size
-//   porder     - scalar, polynomial order (1 or 2)
-//   kernel     - string, kernel type ("epa" or "gau")
-//   alp        - scalar, significance level (e.g. 0.05)
-//   num_zeval  - scalar, number of evaluation points
+//   kd0_Z      - num_zeval x 1 kernel density estimates
+//   bw         - scalar bandwidth
+//   n          - sample size
+//   porder     - polynomial order (1 or 2)
+//   kernel     - kernel type ("epa" or "gau")
+//   alp        - significance level
+//   num_zeval  - number of evaluation points
 //
-// Returns (by reference):
+// Outputs (passed by reference):
 //   se         - num_zeval x 1 standard errors
-//   mathcal_V  - num_zeval x 1 variance estimates V_hat(z_r)
-//   U_hat      - n x num_zeval residual matrix (for bootstrap)
-//   ci1_lower  - num_zeval x 1 analytical UCB lower bounds
-//   ci1_upper  - num_zeval x 1 analytical UCB upper bounds
-//
-// Paper ref: Section 5 (Aggregation SE and analytical UCB)
+//   mathcal_V  - num_zeval x 1 variance estimates
+//   U_hat      - n x num_zeval residual matrix
+//   ci1_lower  - num_zeval x 1 analytical CI lower bounds
+//   ci1_upper  - num_zeval x 1 analytical CI upper bounds
 // -----------------------------------------------------------------------------
 void didhetero_aggte_se(
     real matrix J,
@@ -1129,18 +1090,14 @@ void didhetero_aggte_se(
     real scalar const_V, lambda
     real scalar r
 
-    // === Subtask 1.2: Initialize outputs with missing values ===
+    // Initialize outputs with missing values
     se        = J(num_zeval, 1, .)
     mathcal_V = J(num_zeval, 1, .)
     U_hat     = J(n, num_zeval, .)
     ci1_lower = J(num_zeval, 1, .)
     ci1_upper = J(num_zeval, 1, .)
 
-    // === Subtask 1.3: const_V selection by porder (Section 4.2.3) ===
-    // const_V = (porder == 1) * const_V1 + (porder == 2) * const_V2
-    // const_V1 = I_{0,K^2}
-    // const_V2 = (I_{4,K}^2*I_{0,K^2} - 2*I_{2,K}*I_{4,K}*I_{2,K^2}
-    //             + I_{2,K}^2*I_{4,K^2}) / (I_{4,K} - I_{2,K}^2)^2
+    // const_V selection by polynomial order
     if (porder == 1) {
         if (kernel == "epa") {
             const_V = 3/5                          // 0.6
@@ -1161,9 +1118,7 @@ void didhetero_aggte_se(
         _error(3498, "invalid porder for aggte SE: must be 1 or 2")
     }
 
-    // === Subtask 1.4: lambda selection (kernel constant for analytical UCB) ===
-    // Epanechnikov: lambda = 5/2 = 2.5
-    // Gaussian:     lambda = 1/2 = 0.5
+    // Lambda selection for analytical uniform confidence bands
     if (kernel == "epa") {
         lambda = 2.5
     }
@@ -1174,14 +1129,12 @@ void didhetero_aggte_se(
         _error(3498, "invalid kernel for aggte SE: " + kernel)
     }
 
-    // === Guard: invalid inputs ===
+    // Guard: invalid inputs
     if (n <= 0 | bw <= 0) {
         return
     }
 
-    // =================================================================
-    // Main loop over evaluation points (Section 5)
-    // =================================================================
+    // Main loop over evaluation points
     {
         real scalar mu_J_bw, sigma2_bw_scalar, sigma2, V_hat_r
         real colvector J_r, mu_J_hat, sigma2_bw_vec
@@ -1191,12 +1144,7 @@ void didhetero_aggte_se(
             // Extract J_i(z_r) column
             J_r = J[., r]
 
-            // ==========================================================
-            // Step 1: IMSE-DPI bandwidth for residual mean (always p=1)
-            // Section 4.2.6 (bandwidth selection):
-            //   mu_J_0_bw = lpbwselect(J[,r], Z, Z_supp,
-            //       p=1, deriv=0, kernel, bwselect="imse-dpi")
-            // ==========================================================
+            // Step 1: IMSE-DPI bandwidth for residual mean (p=1)
             mu_J_bw = _aggte_lpbwselect_imse_odd(J_r, Z, Z_supp,
                           1, 0, kernel)
 
@@ -1205,25 +1153,13 @@ void didhetero_aggte_se(
                 continue
             }
 
-            // ==========================================================
-            // Step 2: LPR estimate at ALL observations (always p=1)
-            // Section 4.2.1 (LPR estimation):
-            //   mu_J_hat = lpr(J[,r], Z, Z, p=1, deriv=0, kernel, mu_J_bw)
-            // ==========================================================
+            // Step 2: LPR estimate at all observations (p=1)
             mu_J_hat = didhetero_lpr(J_r, Z, Z, 1, 0, kernel, mu_J_bw)
 
-            // ==========================================================
-            // Step 3a: Residuals (Section 4.2.3)
-            //   U_hat[,r] = J[,r] - mu_J_0
-            // ==========================================================
+            // Step 3a: Residuals
             U_hat[., r] = J_r - mu_J_hat
 
-            // ==========================================================
-            // Step 3b: MSE-DPI bandwidth for U^2 (always p=1)
-            // Section 4.2.3 (variance estimation):
-            //   sigma2_bw = lpbwselect(U_hat[,r]^2, Z,
-            //       zeval[r], p=1, deriv=0, kernel, bwselect="mse-dpi")
-            // ==========================================================
+            // Step 3b: MSE-DPI bandwidth for squared residuals (p=1)
             sigma2_bw_vec = _aggte_lpbwselect_mse_odd(U_hat[., r] :^ 2, Z,
                                 zeval[r], 1, 0, kernel)
             sigma2_bw_scalar = sigma2_bw_vec[1]
@@ -1233,27 +1169,16 @@ void didhetero_aggte_se(
                 continue
             }
 
-            // ==========================================================
-            // Step 3c: LPR estimate of sigma^2 (always p=1)
-            // Section 4.2.3 (variance estimation):
-            //   sigma2 = lpr(U_hat[,r]^2, Z,
-            //       zeval[r], p=1, deriv=0, kernel, sigma2_bw)
-            // ==========================================================
+            // Step 3c: LPR estimate of sigma^2 (p=1)
             real scalar sigma2_raw_aggte
             sigma2_raw_aggte = didhetero_lpr(U_hat[., r] :^ 2, Z, zeval[r],
                                    1, 0, kernel, sigma2_bw_scalar)
 
-            // Truncate negative variance to 0.
-            // Track raw value: negative LPR at boundary z is an artifact
-            // of p=1 linear extrapolation near data edge.
+            // Truncate negative variance to zero
             sigma2 = sigma2_raw_aggte
             if (sigma2[1] < 0) sigma2 = 0
 
-            // ==========================================================
-            // Step 4: Variance and SE (Section 4.2.3, Eq. 19)
-            //   mathcal_V[r] = const_V * sigma2 / kd0_Z[r]
-            //   se[r] = sqrt(mathcal_V[r] / (n * bw))
-            // ==========================================================
+            // Step 4: Variance and standard error
             if (kd0_Z[r] > 0 & kd0_Z[r] < .) {
                 V_hat_r = const_V * sigma2[1] / kd0_Z[r]
             }
@@ -1264,10 +1189,7 @@ void didhetero_aggte_se(
             mathcal_V[r] = V_hat_r
 
             if (sigma2_raw_aggte[1] < 0) {
-                // sigma2_raw_aggte < 0: LPR of U^2 extrapolates below zero.
-                // Reliable indicator of insufficient local data at z_r
-                // (boundary evaluation point). SE=. prevents degenerate
-                // [est,est] CI that would falsely imply perfect precision.
+                // Negative variance indicates insufficient local data
                 se[r] = .
             }
             else if (V_hat_r != . & V_hat_r >= 0) {
@@ -1279,18 +1201,13 @@ void didhetero_aggte_se(
         }
     }
 
-    // =================================================================
-    // Analytical critical value and UCB (Section 4.2.4, Eq. 21-22)
-    // =================================================================
+    // Analytical critical value and uniform confidence bands
     {
         real scalar c_hat, n_missing
 
         c_hat = didhetero_analytical_crit(zeval, bw, lambda, alp)
 
         if (c_hat < .) {
-            // Keep the analytical band unavailable when the joint
-            // critical value formula is invalid. Preserve that state
-            // instead of silently switching to a pointwise interval.
             ci1_lower = aggte_est - c_hat :* se
             ci1_upper = aggte_est + c_hat :* se
         }
@@ -1313,17 +1230,11 @@ void didhetero_aggte_se(
 // =============================================================================
 // didhetero_aggte_bootstrap()
 //
-// Aggte-level multiplier bootstrap for uniform confidence bands (Phase A only).
-//
-// Design:
-//   Phase A (this function): for each eval point id_eval
-//     - For each zeval point, compute kernel-weighted bootstrap t-statistics
-//     - Store sup-t across zeval into mb_sup_t[., id_eval]
-//   Phase B (moved to _aggte_fill_ci2): after all eval points, compute
-//     bootstrap critical values (global or per-eval) and fill CI2 for ALL evals.
-//
-// Paper ref: Section 5 (Aggregation bootstrap UCB construction)
-// Two-phase approach: accumulate sup-t within eval loop, then compute critical values.
+// Aggregation-level multiplier bootstrap for uniform confidence bands (Phase A).
+// For each evaluation point, computes kernel-weighted bootstrap t-statistics
+// across all z evaluation points and stores the supremum. Phase B (critical
+// value computation and confidence interval construction) is handled separately
+// after all evaluation points have been processed.
 // =============================================================================
 void didhetero_aggte_bootstrap(
     real colvector aggte_est,
@@ -1362,24 +1273,18 @@ void didhetero_aggte_bootstrap(
     _didhetero_kernel_constants(kernel, I_2_K1, I_4_K1, I_6_K1,
                                 I_0_K2, I_2_K2, I_4_K2, I_6_K2)
 
-    // =====================================================================
-    // Phase A: Per-eval computation
     // Accumulate bootstrap t-statistics across zeval points
-    // =====================================================================
-
-    // mb_t: biters x num_zeval matrix of t-statistics for this eval
     mb_t = J(biters, num_zeval, .)
 
     for (r = 1; r <= num_zeval; r++) {
 
-        // Step 1: Scaled distance u_{ih} = (Z_i - zeval[r]) / bw
+        // Scaled distance u_{ih} = (Z_i - zeval[r]) / bw
         u_r = (Z :- zeval[r]) / bw
 
-        // Step 2: Kernel values K(u_{ih})
+        // Kernel values K(u_{ih})
         kv_r = didhetero_kernel_eval(u_r, kernel)
 
-        // Step 3: Equivalent kernel Psi
-        // Paper ref: Section 4.2.2 (Equivalent kernel for variance estimation)
+        // Equivalent kernel Psi
         if (porder == 1) {
             Psi_r = J(n, 1, 1)
         }
@@ -1390,25 +1295,20 @@ void didhetero_aggte_bootstrap(
             _error(3498, "porder must be 1 or 2")
         }
 
-        // Step 4: Perturbation vector = Psi_r .* U_hat[.,r] .* kv_r
+        // Perturbation vector = Psi_r .* U_hat[.,r] .* kv_r
         perturb = Psi_r :* U_hat[., r] :* kv_r
 
-        // Step 5: Scale factor = 1 / (kd0_Z[r] * n * bw)
-        // Edge case: kd0_Z[r] == 0 or missing => set mb_t to missing
+        // Scale factor = 1 / (kd0_Z[r] * n * bw)
         if (kd0_Z[r] <= 0 | kd0_Z[r] >= .) {
             mb_t[., r] = J(biters, 1, .)
             continue
         }
         scale = 1 / (kd0_Z[r] * n * bw)
 
-        // Step 6: Vectorized bootstrap estimates (all B iterations at once)
-        // mb_est = aggte_est[r] + scale * (mb_weight - 1) * perturb
-        // (B x n) * (n x 1) = (B x 1)
+        // Vectorized bootstrap estimates (all B iterations at once)
         mb_est = J(biters, 1, aggte_est[r]) :+ scale :* ((mb_weight :- 1) * perturb)
 
-        // Step 7: Bootstrap t-statistics
-        // If se[r] > 0 and non-missing: t = |mb_est - aggte_est[r]| / se[r]
-        // Else: t = missing
+        // Bootstrap t-statistics
         if (se[r] > 0 & se[r] < .) {
             mb_t_r = abs(mb_est :- aggte_est[r]) :/ se[r]
         }
@@ -1416,42 +1316,33 @@ void didhetero_aggte_bootstrap(
             mb_t_r = J(biters, 1, .)
         }
 
-        // Step 8: Store t-statistics for this zeval point
+        // Store t-statistics for this zeval point
         mb_t[., r] = mb_t_r
     }
 
-    // Step 9: Sup-t for this eval: row-wise max over all zeval points
-    // mb_sup_t[., id_eval] = rowmax(mb_t) with missing-value handling
+    // Sup-t for this eval: row-wise max over all zeval points
     for (b = 1; b <= biters; b++) {
         mb_sup_t[b, id_eval] = didhetero_max_nonmissing(mb_t[b, .]')
     }
-
-    // Note:
-    // Phase B (critical values + CI2 construction) is handled in
-    // _aggte_fill_ci2() after all eval points have accumulated their
-    // mb_sup_t columns. This avoids duplicate/unused CI2 computations here.
 }
 
 
 // =============================================================================
 // _didhetero_unflatten_B_g_t()
 //
-// Convert a flattened B_g_t matrix (n x R*K) into a pointer colvector of
-// length K, where each pointer points to an n x R matrix.
+// Convert a flattened B_g_t matrix (n x R*K) into a pointer column vector of
+// length K, where each pointer references an n x R matrix. The flattened format
+// stores columns as [B_1, B_2, ..., B_K] where each B_k contains R columns
+// corresponding to the k-th (g,t) pair.
 //
-// The flattened format stores columns as:
-//   [B_1_col1..B_1_colR, B_2_col1..B_2_colR, ..., B_K_col1..B_K_colR]
-//
-// So columns [(k-1)*R+1 .. k*R] correspond to the k-th (g,t) pair.
-//
-// Parameters:
+// Arguments:
 //   B_flat      - n x (R*K) flattened influence function matrix
-//   n           - sample size (rows)
+//   n           - sample size
 //   num_zeval   - R, number of z evaluation points
 //   num_gteval  - K, number of (g,t) pairs
 //
 // Returns:
-//   pointer colvector of length K, each -> n x R matrix
+//   pointer column vector of length K
 // =============================================================================
 pointer(real matrix) colvector _didhetero_unflatten_B_g_t(
     real matrix B_flat,
@@ -1467,8 +1358,7 @@ pointer(real matrix) colvector _didhetero_unflatten_B_g_t(
     for (k = 1; k <= num_gteval; k++) {
         col_lo = (k - 1) * num_zeval + 1
         col_hi = k * num_zeval
-        // Force independent copy via expression (1 * ...) to avoid
-        // pointer aliasing with the source matrix subview
+        // Force independent copy to avoid pointer aliasing
         B_g_t[k] = &(1 * B_flat[., col_lo..col_hi])
     }
 
@@ -1476,49 +1366,32 @@ pointer(real matrix) colvector _didhetero_unflatten_B_g_t(
 }
 
 
-// NOTE: Removed unused helper `_didhetero_aggte_read_matrices()` to reduce
-// dead code and avoid duplicate read/validate paths. All necessary dimension
-// validations are now performed inside `_didhetero_aggte_ado_entry()` below.
-
-
 // =============================================================================
 // didhetero_aggte_pass2()
 //
-// Pass 2 re-estimation for a single aggregation eval point.
-// Calls didhetero_catt_core() with the aggregation-optimal bandwidth h_agg,
-// then recomputes weights, xi, J, and aggregated point estimate using the
-// new CATT results.
+// Pass 2 re-estimation for a single aggregation evaluation point. Re-estimates
+// CATT parameters using the aggregation-optimal bandwidth, then recomputes
+// weights, influence functions, and aggregated estimates. When num_gte equals 1,
+// the CATT estimate is returned directly as the aggregated result.
 //
-// This function implements Pass 2 of the two-pass aggregation pipeline
-// described in Imai, Qin, and Yanagi (2025), Section 5:
-//   Pass 1: Compute weights/xi/J using original CATT results (existing funcs)
-//   BW sel: IMSE-optimal bandwidth from J (didhetero_aggte_bw_pass1)
-//   Pass 2: Re-estimate CATT with h_agg, recompute weights/xi/J (THIS FUNC)
-//   SE/UCB: Standard errors and confidence bands (existing funcs)
-//
-// For num_gte == 1: short-circuit — CATT result IS the aggregated result.
-// For num_gte >= 2: full re-estimation pipeline.
-//
-// Parameters:
-//   data        - DidHeteroData struct (read-only)
+// Arguments:
+//   data        - DidHeteroData struct
 //   gps_mat     - GPS result matrix from Stage 1
 //   or_mat      - OR result matrix from Stage 1
-//   gteeval_sub - M x 3 matrix of (g, t, eval) triples for this eval point
-//   h_agg       - scalar, aggregation-optimal bandwidth (from Pass 1 or manual)
-//   type        - aggregation type: "dynamic", "group", "calendar", "simple"
-//   gbar        - upper bound for control group (. for infinity)
+//   gteeval_sub - M x 3 matrix of (g, t, eval) triples
+//   h_agg       - aggregation-optimal bandwidth
+//   type        - aggregation type
+//   gbar        - upper bound for control group
 //
-// Returns (by reference):
+// Outputs (passed by reference):
 //   aggte_est      - R x 1 aggregated point estimate
 //   J              - n x R aggregated influence function
 //   aggte_weight   - R x num_gte weight matrix
-//   aggte_kappa    - R x 1 normalization constant (simple type)
+//   aggte_kappa    - R x 1 normalization constant
 //   catt_est_new   - R x num_gte CATT point estimates
-//   B_g_t_cv       - pointer colvector of length num_gte, each -> n x R
+//   B_g_t_cv       - pointer column vector of length num_gte
 //   G_g_new        - n x num_gte group indicator matrix
 //   mu_G_g_new     - R x num_gte conditional group density
-//
-// Paper ref: Section 5 (Aggregation re-estimation with optimal bandwidth)
 // =============================================================================
 void didhetero_aggte_pass2(
     struct DidHeteroData scalar data,
@@ -1546,9 +1419,7 @@ void didhetero_aggte_pass2(
     real colvector bw_scalar
     pointer(real matrix) colvector xi_g_t
 
-    // =====================================================================
-    // Task 2.2: Input validation
-    // =====================================================================
+    // Input validation
     if (h_agg <= 0 | h_agg >= .) {
         _error(3498, "didhetero_aggte_pass2: h_agg must be > 0 and non-missing")
     }
@@ -1559,63 +1430,37 @@ void didhetero_aggte_pass2(
         _error(3498, "didhetero_aggte_pass2: gteeval_sub must have 3 columns (g, t, eval)")
     }
 
-    // =====================================================================
-    // Task 2.3: Variable initialization
-    // =====================================================================
+    // Variable initialization
     num_gte   = rows(gteeval_sub)
     n         = data.n
     num_zeval = data.num_zeval
 
-    // =====================================================================
-    // Task 5: num_gte == 1 short-circuit
-    //
-    // When only one (g,t) pair maps to this eval point, the aggregated
-    // parameter IS the CATT parameter. No weight/xi/J computation needed.
-    // But we still re-estimate CATT with h_agg bandwidth.
-    // =====================================================================
+    // Short-circuit: when only one (g,t) pair maps to this evaluation point,
+    // the aggregated parameter equals the CATT parameter
     if (num_gte == 1) {
 
-        // --- Task 3: Call catt_core with h_agg ---
         gteval_gt = gteeval_sub[., 1::2]
         bw_scalar = J(1, 1, h_agg)
 
-        // Use aggte-level porder/kernel for the re-estimation pass
         catt_result = didhetero_catt_core(data, gps_mat, or_mat,
                           gteval_gt, bw_scalar, "manual",
                           porder, kernel)
 
-        // --- Task 4: Extract results ---
-        catt_est_new = catt_result.catt_est       // R x 1
+        catt_est_new = catt_result.catt_est
         B_g_t_cv     = J(1, 1, NULL)
-        B_g_t_cv[1]  = catt_result.B_g_t[1]      // pointer copy
-        G_g_new      = catt_result.G_g            // n x 1
-        mu_G_g_new   = catt_result.mu_G_g         // R x 1
+        B_g_t_cv[1]  = catt_result.B_g_t[1]
+        G_g_new      = catt_result.G_g
+        mu_G_g_new   = catt_result.mu_G_g
 
-        // --- Task 5.2-5.4: Short-circuit outputs ---
-        aggte_est    = catt_est_new[., 1]         // R x 1
-        J            = J(n, num_zeval, .)         // missing (no aggregation)
-        aggte_weight = J(num_zeval, 1, 1)         // weight = 1
-        aggte_kappa  = J(num_zeval, 1, 1)         // kappa = 1
+        aggte_est    = catt_est_new[., 1]
+        J            = J(n, num_zeval, .)
+        aggte_weight = J(num_zeval, 1, 1)
+        aggte_kappa  = J(num_zeval, 1, 1)
 
         return
     }
 
-    // =====================================================================
-    // Task 3: Internal catt_gt call (Section 5)
-    //
-    // Call didhetero_catt_core() with:
-    //   bw       = h_agg (scalar, expanded to vector inside catt_core)
-    //   bwselect = "manual" (skip CATT-level BW selection)
-    //   porder   = aggte-level porder
-    //   kernel   = aggte-level kernel
-    //   gteval   = gteeval_sub[., 1::2] (only g,t columns)
-    //
-    // Note: bstrap is implicitly FALSE because catt_core does not do
-    // bootstrap — it only computes point estimates and influence functions.
-    // The aggte layer has its own bootstrap.
-    //
-    // Paper ref: Section 5 (Pass 2 re-estimation with aggregation-level bandwidth)
-    // =====================================================================
+    // Internal CATT call with aggregation-optimal bandwidth
     gteval_gt = gteeval_sub[., 1::2]
     bw_scalar = J(1, 1, h_agg)
 
@@ -1624,23 +1469,18 @@ void didhetero_aggte_pass2(
                       gteval_gt, bw_scalar, "manual",
                       porder, kernel)
 
-    // =====================================================================
-    // Task 4: Extract Pass 2 results from DidHeteroCattResult
-    //
-    // Convert B_g_t from rowvector (1 x K) to colvector (K x 1) for
-    // compatibility with aggte_J() and aggte_xi() which expect colvectors.
-    // =====================================================================
-    catt_est_new = catt_result.catt_est           // R x num_gte
-    G_g_new      = catt_result.G_g                // n x num_gte
-    mu_G_g_new   = catt_result.mu_G_g             // R x num_gte
+    // Extract Pass 2 results
+    catt_est_new = catt_result.catt_est
+    G_g_new      = catt_result.G_g
+    mu_G_g_new   = catt_result.mu_G_g
 
-    // Convert pointer rowvector -> colvector
+    // Convert pointer rowvector to column vector
     B_g_t_cv = J(num_gte, 1, NULL)
     for (k = 1; k <= num_gte; k++) {
         B_g_t_cv[k] = catt_result.B_g_t[k]
     }
 
-    // --- Dimension validation ---
+    // Dimension validation
     if (cols(catt_est_new) != num_gte) {
         _error(3498, sprintf("aggte_pass2: catt_est cols=%g, expected num_gte=%g",
                              cols(catt_est_new), num_gte))
@@ -1654,40 +1494,17 @@ void didhetero_aggte_pass2(
                              cols(mu_G_g_new), num_gte))
     }
 
-    // =====================================================================
-    // Task 6: Pass 2 weight recalculation
-    //
-    // Recompute aggregation weights using Pass 2's mu_G_g_new.
-    // For group type, weights are 1/T_post (independent of mu_G_g),
-    // so Pass 1 and Pass 2 weights are identical.
-    // For dynamic/calendar/simple, weights depend on mu_G_g which
-    // changes with bandwidth, so Pass 2 weights differ from Pass 1.
-    // =====================================================================
+    // Pass 2 weight recalculation
     didhetero_aggte_weights(mu_G_g_new, gteeval_sub, type, gbar,
                             num_zeval, num_gte,
                             aggte_weight, aggte_kappa)
 
-    // =====================================================================
-    // Task 7: Pass 2 xi recalculation
-    //
-    // Recompute influence functions for weight estimation uncertainty
-    // using Pass 2's G_g_new, mu_G_g_new, and new weights.
-    // For group type, xi = 0 (weights are deterministic).
-    // =====================================================================
+    // Pass 2 influence function recalculation
     didhetero_aggte_xi(G_g_new, mu_G_g_new, aggte_weight, aggte_kappa,
                        type, n, num_zeval, num_gte,
                        xi_g_t)
 
-    // =====================================================================
-    // Task 8: Pass 2 J and aggregated point estimate recalculation
-    //
-    // J_i(z_r) = sum_{(g,t)} [ w_{g,t}(z_r) * B_{i,g,t}(z_r)
-    //                         + DR_{g,t}(z_r) * xi_{i,g,t}(z_r) ]
-    //
-    // aggte_est(z_r) = sum_{(g,t)} [ catt_est(z_r, g,t) * w_{g,t}(z_r) ]
-    //
-    // All inputs are from Pass 2 (new B_g_t, new weights, new xi).
-    // =====================================================================
+    // Pass 2 J and aggregated point estimate recalculation
     didhetero_aggte_J(B_g_t_cv, xi_g_t, aggte_weight, catt_est_new,
                       n, num_zeval, num_gte,
                       J, aggte_est)
@@ -1697,30 +1514,22 @@ void didhetero_aggte_pass2(
 // =============================================================================
 // _didhetero_aggte_build_eval()
 //
-// Build the default eval vector for aggregation based on type, or validate
-// and use user-specified eval values.
+// Build the default evaluation vector for aggregation based on type, or validate
+// and use user-specified evaluation values. Default construction by type:
+//   dynamic:  unique sorted values of (t - g)
+//   group:    unique sorted values of g (post-treatment only)
+//   calendar: unique sorted values of t (post-treatment only)
+//   simple:   single missing value
 //
-// Default eval construction by type:
-//   dynamic:  unique sorted values of (t - g) from gteval
-//   group:    unique sorted values of g from gteval
-//   calendar: unique sorted values of t where t >= g from gteval
-//   simple:   single missing value J(1, 1, .)
+// User-specified values override defaults after validation against the default set.
 //
-// When user specifies eval (user_eval is non-empty), the user values
-// override the default. Validation checks that user values are within
-// the valid range (i.e., they exist in the default set).
-//
-// Paper ref: Section 5, default eval construction for aggregation.
-//
-// Parameters:
+// Arguments:
 //   gteval    - K x 2 matrix of (g, t) pairs
-//   type      - aggregation type: "dynamic", "group", "calendar", "simple"
-//   user_eval - column vector of user-specified eval values
-//               (0 rows if user did not specify)
+//   type      - aggregation type
+//   user_eval - column vector of user-specified values (empty if not specified)
 //
 // Returns:
-//   default eval: unique sorted column vector
-//   user eval: original user-specified order after validation
+//   column vector of evaluation points
 // =============================================================================
 real colvector _didhetero_aggte_build_eval(
     real matrix gteval,
@@ -1733,16 +1542,12 @@ real colvector _didhetero_aggte_build_eval(
 
     K = rows(gteval)
 
-    // =====================================================================
-    // Step 1: Build default eval based on type
-    // =====================================================================
+    // Build default eval based on type
 
     if (type == "simple") {
-        // simple: single missing value
         default_eval = J(1, 1, .)
     }
     else if (type == "dynamic") {
-        // dynamic: unique sorted values of the period-index event time
         raw_vals = J(K, 1, .)
         dyn_support = _aggte_time_support_from_gteval(gteval)
         for (i = 1; i <= K; i++) {
@@ -1753,10 +1558,7 @@ real colvector _didhetero_aggte_build_eval(
         default_eval = _didhetero_unique_sorted(raw_vals)
     }
     else if (type == "group") {
-        // group: unique sorted values of g but only for post-treatment pairs
-        // Section 5: gteval0 is pre-filtered by
-        // t - g >= 0 before constructing default eval for non-dynamic types.
-        // Mirror that here by excluding rows with t < g.
+        // Group: unique sorted values of g for post-treatment pairs only
         n_raw = 0
         for (i = 1; i <= K; i++) {
             if (gteval[i, 2] >= gteval[i, 1]) {
@@ -1777,8 +1579,7 @@ real colvector _didhetero_aggte_build_eval(
         default_eval = _didhetero_unique_sorted(raw_vals)
     }
     else if (type == "calendar") {
-        // calendar: unique sorted values of t where t >= g
-        // First filter to post-treatment rows
+        // Calendar: unique sorted values of t for post-treatment periods only
         n_raw = 0
         for (i = 1; i <= K; i++) {
             if (gteval[i, 2] >= gteval[i, 1]) {
@@ -1802,9 +1603,7 @@ real colvector _didhetero_aggte_build_eval(
         _error(3498, "invalid aggregation type: " + type)
     }
 
-    // =====================================================================
-    // Step 2: User override or return default
-    // =====================================================================
+    // User override or return default
 
     if (rows(user_eval) == 0) {
         return(default_eval)
@@ -1838,11 +1637,6 @@ real colvector _didhetero_aggte_build_eval(
         }
     }
 
-    // Preserve the user's eval() order exactly. The default eval set is
-    // sorted, but when eval is supplied explicitly, downstream loops use
-    // eval[id_eval] in the original order. This positional contract also
-    // governs manual bw() vectors, where bw[id_eval] must map to the same
-    // user-specified eval[id_eval].
     return(user_eval)
 }
 
@@ -1921,18 +1715,12 @@ real colvector _didhetero_unique_sorted(real colvector v)
 // =============================================================================
 // didhetero_aggte_main()
 //
-// Main orchestration function for the aggte_gt command.
-// Reads CATT-level results and persisted Pass 2 inputs from e(), and
-// orchestrates Stories 6.1-6.7 to produce aggregated parameter estimates.
-//
-// Three-phase design (Imai, Qin, and Yanagi, 2025, Section 5):
-//   Phase 1: For each eval point — triplet filtering, weights, xi, J, BW
-//   Phase 1.5: uniformall common bandwidth (min across eval points)
-//   Phase 2: For each non-shortcircuit eval — Pass 2 re-estimation, SE,
-//            bootstrap Phase A
-//   Phase 3: Bootstrap Phase B critical values (after all evals)
-//
-// Paper ref: Section 5, full aggregation pipeline
+// Main orchestration function for the aggte_gt command. Implements the
+// three-phase aggregation pipeline: (1) Pass 1 estimation for all evaluation
+// points including triplet filtering, weight computation, influence functions,
+// and bandwidth selection; (2) Pass 2 re-estimation with optimal bandwidths
+// for non-shortcircuit evaluation points, including standard error computation
+// and bootstrap Phase A; (3) Bootstrap Phase B for critical value computation.
 // =============================================================================
 struct AggtResult scalar didhetero_aggte_main(
     string scalar type,
@@ -1995,9 +1783,7 @@ struct AggtResult scalar didhetero_aggte_main(
     real matrix mb_weight, mb_sup_t
     real colvector ci2_lower_e, ci2_upper_e
 
-    // =====================================================================
-    // Step 0: Extract dimensions and initialize result
-    // =====================================================================
+    // Extract dimensions and initialize result
     num_eval   = rows(eval_points)
     num_zeval  = rows(zeval)
     num_gteval = rows(gteval)
@@ -2020,10 +1806,7 @@ struct AggtResult scalar didhetero_aggte_main(
     printf("{txt}aggte_gt: starting aggregation (%s, %g eval points)\n",
            type, num_eval)
 
-    // =====================================================================
-    // Phase 0: Pre-generate Bootstrap weights
-    // Shared across all eval points (Section 4.2.4)
-    // =====================================================================
+    // Pre-generate bootstrap weights (shared across all eval points)
     if (bstrap) {
         if (seed >= 0 & seed < .) {
             rseed(seed)
@@ -2034,20 +1817,14 @@ struct AggtResult scalar didhetero_aggte_main(
                biters)
     }
 
-    // =====================================================================
-    // PHASE 1: Pass 1 — triplet filtering, weights, xi/J, BW selection
-    // For all eval points, collect Pass 1 bandwidths
-    // Paper ref: Section 5 (Pass 1 estimation)
-    // =====================================================================
+    // Phase 1: Pass 1 estimation — triplet filtering, weights, xi/J, BW selection
     printf("{txt}  Phase 1: Pass 1 estimation...\n")
 
     for (id_eval = 1; id_eval <= num_eval; id_eval++) {
 
         e1 = eval_points[id_eval]
 
-        // -----------------------------------------------------------------
-        // Step 1: Triplet filtering
-        // -----------------------------------------------------------------
+        // Triplet filtering
         gteeval = didhetero_build_gteeval(gteval, gbar, type,
                       J(1, 1, e1))
         num_gte = rows(gteeval)
@@ -2060,10 +1837,7 @@ struct AggtResult scalar didhetero_aggte_main(
             continue
         }
 
-        // -----------------------------------------------------------------
-        // Short-circuit: num_gte == 1 (Section 5)
-        // Directly use CATT-level results
-        // -----------------------------------------------------------------
+        // Short-circuit: num_gte == 1, directly use CATT-level results
         if (num_gte == 1) {
             id_gt = _aggte_find_gt_index(gteeval[1,1], gteeval[1,2],
                         gteval)
@@ -2118,9 +1892,7 @@ struct AggtResult scalar didhetero_aggte_main(
             continue
         }
 
-        // -----------------------------------------------------------------
-        // Step 1b: Extract submatrices for this eval's (g,t) pairs
-        // -----------------------------------------------------------------
+        // Extract submatrices for this eval's (g,t) pairs
         gt_indices   = _aggte_find_gt_indices(gteeval, gteval)
         mu_G_g_sub   = mu_G_g[., gt_indices]
         G_g_sub      = G_g[., gt_indices]
@@ -2130,16 +1902,12 @@ struct AggtResult scalar didhetero_aggte_main(
             B_g_t_sub[k] = B_g_t[gt_indices[k]]
         }
 
-        // -----------------------------------------------------------------
-        // Step 2: Weight computation
-        // -----------------------------------------------------------------
+        // Weight computation
         didhetero_aggte_weights(mu_G_g_sub, gteeval, type, gbar,
                                 num_zeval, num_gte,
                                 aggte_weight, aggte_kappa)
 
-        // -----------------------------------------------------------------
-        // Step 3: xi and J computation
-        // -----------------------------------------------------------------
+        // Influence function computation
         didhetero_aggte_xi(G_g_sub, mu_G_g_sub, aggte_weight,
                            aggte_kappa, type, n, num_zeval, num_gte,
                            xi_g_t)
@@ -2148,9 +1916,7 @@ struct AggtResult scalar didhetero_aggte_main(
                           catt_est_sub, n, num_zeval, num_gte,
                           J_mat, aggte_est_e)
 
-        // -----------------------------------------------------------------
-        // Step 4: Pass 1 bandwidth selection
-        // -----------------------------------------------------------------
+        // Pass 1 bandwidth selection
         // Manual bandwidth handling:
         // - If bwselect == "manual" and length(bw) == 1 → use scalar for all eval
         // - If bwselect == "manual" and length(bw) == num_eval → per-eval values
@@ -2176,12 +1942,7 @@ struct AggtResult scalar didhetero_aggte_main(
                id_eval, e1, num_gte, h_agg_vec[id_eval])
     }
 
-    // =====================================================================
-    // PHASE 1.5: uniformall common bandwidth (Section 5; Assumption 7)
-    // Apply common bandwidth policy:
-    // - Always collapse to min(bw) when uniformall == 1
-    // - Also collapse when bwselect == "manual" and length(bw) == 1
-    // =====================================================================
+    // Phase 1.5: uniformall common bandwidth
     if (uniformall == 1 | (bwselect == "manual" & rows(bw_manual) == 1)) {
         // If manual scalar provided, use the scalar for all evals,
         // regardless of any short-circuit CATT bandwidths.
@@ -2208,11 +1969,7 @@ struct AggtResult scalar didhetero_aggte_main(
 
     result.aggte_bw = h_agg_vec
 
-    // =====================================================================
-    // PHASE 2: Pass 2 — re-estimation with optimal bandwidth
-    // For all non-shortcircuit eval points
-    // Paper ref: Section 5 (Pass 2 re-estimation with optimal bandwidth)
-    // =====================================================================
+    // Phase 2: Pass 2 re-estimation with optimal bandwidth
     printf("{txt}  Phase 2: Pass 2 re-estimation + SE...\n")
 
     for (id_eval = 1; id_eval <= num_eval; id_eval++) {
@@ -2234,9 +1991,7 @@ struct AggtResult scalar didhetero_aggte_main(
                       J(1, 1, e1))
         num_gte = rows(gteeval)
 
-        // -----------------------------------------------------------------
-        // Step 5: Pass 2 re-estimation
-        // -----------------------------------------------------------------
+        // Pass 2 re-estimation
         didhetero_aggte_pass2(
             pass2_data, pass2_gps_mat, pass2_or_mat,
             gteeval, h_agg, type, gbar,
@@ -2244,9 +1999,7 @@ struct AggtResult scalar didhetero_aggte_main(
             aggte_est_p2, J_pass2, aggte_weight_p2, aggte_kappa_p2,
             catt_est_new, B_g_t_cv, G_g_new, mu_G_g_new)
 
-        // -----------------------------------------------------------------
-        // Step 6: Standard errors
-        // -----------------------------------------------------------------
+        // Standard errors
         didhetero_aggte_se(
             J_pass2, aggte_est_p2, Z, zeval, Z_supp, kd0_Z,
             h_agg, n, porder, kernel, alp, num_zeval,
@@ -2258,9 +2011,7 @@ struct AggtResult scalar didhetero_aggte_main(
         result.ci1_lower[id_eval, .] = ci1_lower_e'
         result.ci1_upper[id_eval, .] = ci1_upper_e'
 
-        // -----------------------------------------------------------------
-        // Step 7: Bootstrap Phase A
-        // -----------------------------------------------------------------
+        // Bootstrap Phase A
         if (bstrap) {
             didhetero_aggte_bootstrap(
                 aggte_est_p2, se_e, U_hat_e,
@@ -2328,14 +2079,11 @@ real colvector _aggte_find_gt_indices(
 
 // =============================================================================
 // _aggte_fill_ci2()
-// Fill bootstrap CI2 for all eval points using accumulated mb_sup_t.
-// For uniformall=1: single global critical value applied to ALL evals
-//   (including short-circuit evals per Section 5)
-// For uniformall=0: per-eval critical values (short-circuit evals stay missing
-//   since they have no bootstrap data)
 //
-// When uniformall=1, the global c_check applies to ALL evals including
-// short-circuit (num_gte==1) evals.
+// Fill bootstrap confidence intervals (CI2) for all evaluation points using
+// accumulated supremum t-statistics. For uniformall=1, a single global critical
+// value is applied to all evaluation points including short-circuit cases.
+// For uniformall=0, per-evaluation critical values are used.
 // =============================================================================
 void _aggte_fill_ci2(
     struct AggtResult scalar result,
@@ -2397,34 +2145,29 @@ void _aggte_fill_ci2(
 // =============================================================================
 // _didhetero_aggte_ado_entry()
 //
-// Entry point called from aggte_gt.ado.
-// Reads all CATT-level e() matrices, calls the orchestrator, and stores
-// results back into Stata matrices for the ADO to move into e().
+// Entry point called from aggte_gt.ado. Reads CATT-level results from Stata
+// e() matrices, executes the aggregation pipeline, and stores results back
+// into Stata matrices for the ADO layer to process.
 //
-// Parameters (all passed from ADO):
-//   type         - string: aggregation type
-//   eval_matname - string: name of Stata temp matrix holding eval points
-//   bstrap       - real: 1=bootstrap, 0=no
-//   biters       - real: bootstrap iterations
-//   porder       - real: polynomial order (1 or 2)
-//   kernel       - string: kernel type
-//   bwselect     - string: bandwidth selection method
-//   bw_manual    - real: manual bandwidth (-1 or 0 = auto)
-//   uniformall   - real: 1=global UCB, 0=per-eval
-//   alp          - real: significance level
+// Arguments (passed from ADO):
+//   type         - aggregation type
+//   eval_matname - name of Stata matrix holding evaluation points
+//   bstrap       - 1 to enable bootstrap, 0 otherwise
+//   biters       - bootstrap iterations
+//   seed         - random seed for bootstrap
+//   porder       - polynomial order (1 or 2)
+//   kernel       - kernel type
+//   bwselect     - bandwidth selection method
+//   bw_matname   - name of Stata matrix for manual bandwidth (empty for auto)
+//   uniformall   - 1 for global UCB, 0 for per-evaluation
+//   alp          - significance level
+//   control_group- control group specification
+//   anticipation - anticipation period
 //
 // Side effects:
-//   Stores the following Stata matrices (for ADO to ereturn):
-//     __aggte_Estimate   - (num_eval*num_zeval) x 9 combined table
-//     __aggte_est        - num_eval x num_zeval point estimates
-//     __aggte_se         - num_eval x num_zeval standard errors
-//     __aggte_ci1_lower  - num_eval x num_zeval analytical CI lower
-//     __aggte_ci1_upper  - num_eval x num_zeval analytical CI upper
-//     __aggte_ci2_lower  - num_eval x num_zeval bootstrap CI lower
-//     __aggte_ci2_upper  - num_eval x num_zeval bootstrap CI upper
-//     __aggte_bw         - num_eval x 1 bandwidths
-//     __aggte_eval       - num_eval x 1 eval points
-//     __aggte_zeval      - num_zeval x 1 z evaluation points
+//   Stores results in Stata matrices: __aggte_Estimate, __aggte_est,
+//   __aggte_se, __aggte_ci1_lower, __aggte_ci1_upper, __aggte_ci2_lower,
+//   __aggte_ci2_upper, __aggte_bw, __aggte_eval, __aggte_zeval
 // =============================================================================
 void _didhetero_aggte_ado_entry(
     string scalar type,
@@ -2455,9 +2198,7 @@ void _didhetero_aggte_ado_entry(
     real matrix Estimate
     real colvector bw_manual
 
-    // =====================================================================
-    // Step 1: Read all e() matrices into Mata
-    // =====================================================================
+    // Read all e() matrices into Mata
     B_g_t_flat = st_matrix("e(B_g_t)")
     G_g        = st_matrix("e(G_g)")
     Z_mat      = st_matrix("e(Z)")
@@ -2537,10 +2278,7 @@ void _didhetero_aggte_ado_entry(
         c_check_catt = J(num_gteval, 1, .)
     }
 
-    // ---------------------------------------------------------------------
-    // Dimension validation (moved here from the removed
-    // `_didhetero_aggte_read_matrices()` helper)
-    // ---------------------------------------------------------------------
+    // Dimension validation
     real scalar __err
     __err = 0
     // gteval: K x 2
@@ -2602,8 +2340,7 @@ void _didhetero_aggte_ado_entry(
         _error(198, sprintf("aggte_gt: %g dimension mismatch(es) detected", __err))
     }
 
-    // Persisted Pass 2 inputs must also be available because aggte_gt
-    // re-estimates CATTs with aggregation-specific bandwidths.
+    // Persisted Pass 2 inputs must be available for re-estimation
     if (rows(Y_wide_mat) != n) {
         _error(198, sprintf("aggte_gt: e(dh_Y_wide) rows=%g, expected n=%g", rows(Y_wide_mat), n))
     }
@@ -2646,9 +2383,7 @@ void _didhetero_aggte_ado_entry(
     pass2_data.control_group = control_group
     pass2_data.anticipation = anticipation
 
-    // =====================================================================
-    // Step 2: Call the orchestrator
-    // =====================================================================
+    // Call the orchestrator
     R = didhetero_aggte_main(
         type, eval_points, bstrap, biters, seed, porder,
         kernel, bwselect, bw_manual, uniformall, alp,
@@ -2657,11 +2392,7 @@ void _didhetero_aggte_ado_entry(
         kd0_Z, kd1_Z, Z_supp, gbar, n,
         c_hat_catt, c_check_catt, pass2_data, gps_mat, or_mat)
 
-    // =====================================================================
-    // Step 3: Build e(Estimate) combined matrix
-    // (num_eval * num_zeval) x 9 columns:
-    //   [eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw]
-    // =====================================================================
+    // Build combined results matrix: (num_eval * num_zeval) x 9
     Estimate = J(num_eval * num_zeval, 9, .)
 
     for (id_eval = 1; id_eval <= num_eval; id_eval++) {
@@ -2679,9 +2410,7 @@ void _didhetero_aggte_ado_entry(
         }
     }
 
-    // =====================================================================
-    // Step 4: Store results as Stata matrices
-    // =====================================================================
+    // Store results as Stata matrices
     st_matrix("__aggte_Estimate",  Estimate)
     st_matrix("__aggte_est",       R.aggte_est)
     st_matrix("__aggte_se",        R.aggte_se)
@@ -2698,20 +2427,9 @@ void _didhetero_aggte_ado_entry(
 // =============================================================================
 // _didhetero_aggte_display_table()
 //
-// Display formatted aggregation results table.
-// Called from aggte_gt.ado after e() storage.
-//
-// Reads from Stata matrices __aggte_Estimate, __aggte_eval, __aggte_zeval.
-//
-// Table format:
-//   Aggregated Treatment Effect Estimates (aggte_gt)
-//   Type: dynamic | Polynomial order: 2 | Kernel: epanechnikov
-//   ...
-//   -------+--------+--------+--------+---------+---------+---------+---------
-//     eval |  zeval |    est |     se |  ci1_lb |  ci1_ub |  ci2_lb |  ci2_ub
-//   -------+--------+--------+--------+---------+---------+---------+---------
-//       -2 |  0.200 |  0.015 |  0.032 |  -0.078 |   0.108 |  -0.085 |   0.115
-//   ...
+// Display formatted aggregation results table. Reads results from Stata matrices
+// __aggte_Estimate and prints a formatted table with evaluation points,
+// point estimates, standard errors, and confidence intervals.
 // =============================================================================
 void _didhetero_aggte_display_table(
     string scalar type,

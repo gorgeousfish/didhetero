@@ -1,11 +1,9 @@
 // =============================================================================
 // didhetero_boot.mata
-// Bootstrap weight generation for didhetero-stata
+// Bootstrap weight generation
 //
-// Implements Mammen (1993) two-point distribution weights.
-// Satisfies Assumption 10: E[V*]=1, Var[V*]=1, sub-exponential tails.
-//
-// Paper ref: Section 4.2.4 (Mammen two-point distribution for multiplier bootstrap)
+// Implements Mammen (1993) two-point distribution for multiplier bootstrap.
+// Weights satisfy E[V*] = 1, Var[V*] = 1, and sub-exponential tails.
 // =============================================================================
 
 mata:
@@ -14,10 +12,7 @@ mata:
 // _didhetero_mammen_weights()
 //
 // Generate Mammen (1993) two-point distribution weights.
-// Each element is i.i.d. from the Mammen two-point distribution.
-// Satisfies E[V*] = 1, Var[V*] = 1 (Assumption 10).
-//
-// Paper ref: Assumption 10, Mammen two-point distribution for multiplier bootstrap.
+// Returns an n x 1 vector of i.i.d. draws satisfying E[V*] = 1, Var[V*] = 1.
 //
 // Parameters:
 //   n - sample size (positive integer)
@@ -51,8 +46,7 @@ real colvector _didhetero_mammen_weights(real scalar n)
     // Generate uniform random numbers
     u = runiform(n, 1)
 
-    // Vectorized two-point distribution via inverse CDF
-    // Align threshold convention with bootstrap use sites: u < p1 -> v1; u >= p1 -> v2
+    // Vectorized two-point distribution: u < p1 yields v1, u >= p1 yields v2
     weights = (u :< p1) :* v1 + (u :>= p1) :* v2
 
     return(weights)
@@ -61,11 +55,8 @@ real colvector _didhetero_mammen_weights(real scalar n)
 // -----------------------------------------------------------------------------
 // _didhetero_mammen_weights_batch()
 //
-// Batch generate Mammen weights for all bootstrap iterations.
-// Each row is an independent draw of n i.i.d. Mammen weights.
-// Used by aggte multiplier bootstrap.
-//
-// Paper ref: Section 5, multiplier bootstrap for aggregation.
+// Generate Mammen weights for all bootstrap iterations.
+// Returns a B x n matrix where each row is an independent draw of n weights.
 //
 // Parameters:
 //   B - number of bootstrap iterations (positive integer)
@@ -101,7 +92,7 @@ real matrix _didhetero_mammen_weights_batch(real scalar B, real scalar n)
         n = floor(n)
     }
 
-    // Constants (same as single generation)
+    // Constants for two-point distribution
     kappa = (sqrt(5) + 1) / 2
     v1 = 2 - kappa
     v2 = 1 + kappa

@@ -1,16 +1,11 @@
 mata:
 
 // =============================================================================
-// didhetero_stage1.mata
 // Stage 1 dispatch: parametric estimation (GPS + OR) + KDE
 //
 // Functions:
 //   1. didhetero_parametric_func()   - Unified GPS + OR estimation entry point
-//   2. didhetero_stage1_dispatch()   - Full Stage 1 dispatch (to be added)
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4.2.1 (Stage 1: parametric estimation + KDE)
+//   2. didhetero_stage1_dispatch()   - Full Stage 1 dispatch
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -26,9 +21,7 @@ mata:
 //   anticipation  - anticipation periods (integer >= 0)
 //
 // Returns:
-//   DidHeteroParamResults struct
-//
-// Paper ref: Section 4.2.1, first-stage parametric estimation
+//   DidHeteroParamResults struct containing GPS and OR estimates
 // -----------------------------------------------------------------------------
 struct DidHeteroParamResults scalar didhetero_parametric_func(
     struct DidHeteroData scalar data,
@@ -75,12 +68,10 @@ struct DidHeteroParamResults scalar didhetero_parametric_func(
 //   geval         - K_g x 1 vector of unique treatment groups
 //   control_group - "nevertreated" or "notyettreated"
 //   anticipation  - anticipation periods (integer >= 0)
-//   zeval         - x 1 evaluation points for density estimation
+//   zeval         - M x 1 vector of evaluation points for density estimation
 //
 // Returns:
-//   DidHeteroStage1Results struct with all Stage 1 outputs
-//
-// Paper ref: Section 4.2.1, Stage 1 dispatch (GPS + OR + KDE)
+//   DidHeteroStage1Results struct with GPS estimates, OR estimates, and KDE results
 // -----------------------------------------------------------------------------
 struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
     struct DidHeteroData scalar data,
@@ -106,8 +97,7 @@ struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
     // Step 3: Z_supp grid generation
     Z_supp = didhetero_gen_z_supp(Z)
 
-    // Step 4: Kernel density estimation kd0_Z
-    // Paper ref: Section 4.2.1, density estimation via Epanechnikov kernel
+    // Step 4: Kernel density estimation kd0_Z using Epanechnikov kernel
     kd0_Z = didhetero_kde_density(Z, zeval)
     // Positive value protection: truncate non-positive to 1e-12
     for (r = 1; r <= rows(kd0_Z); r++) {
@@ -117,8 +107,7 @@ struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
         }
     }
 
-    // Step 5: Density derivative estimation kd1_Z
-    // Paper ref: Section 4.2.1, density derivative via local polynomial (p=3, v=2)
+    // Step 5: Density derivative estimation kd1_Z using local polynomial (p=3, v=2)
     kd1_Z = didhetero_kde_deriv(Z, zeval)
     // Missing value check (warn only, no truncation)
     for (r = 1; r <= rows(kd1_Z); r++) {

@@ -40,87 +40,86 @@
 {title:Description}
 
 {pstd}
-{cmd:catt_gt_graph} plots estimated CATT functions or aggregated treatment
-effect curves from {helpb didhetero}, {helpb catt_gt}, or {helpb aggte_gt}
-results stored in {cmd:e()}.
+{cmd:catt_gt_graph} plots estimated CATT functions or aggregated
+treatment-effect curves from {helpb didhetero}, {helpb catt_gt}, or
+{helpb aggte_gt} results stored in {cmd:e()}. The command produces one
+{helpb twoway} graph per (g,t) pair (or per eval point in aggregated mode)
+showing the point estimate and its confidence band as functions of the
+continuous covariate {it:z}.
 
 {pstd}
-The command auto-detects the plot mode based on the column count of the
-results matrix:
-
-{phang2}
-10 columns (from {helpb catt_gt} or {helpb didhetero}) {hline 1} {cmd:CATT}
-mode. One plot is generated per (g,t) pair, showing CATT(g,t,z) as a function
-of z with confidence bands.
-
-{phang2}
-9 columns (from {helpb aggte_gt}) {hline 1} {cmd:Aggregated} mode. One plot
-is generated per evaluation point (or a single plot for {cmd:simple} type),
-showing the aggregated CATT as a function of z.
+The plot mode is determined automatically from the column count of the
+preferred results matrix: 10 columns ({helpb catt_gt}/{helpb didhetero})
+triggers {cmd:CATT} mode, while 9 columns ({helpb aggte_gt}) triggers
+{cmd:Aggregated} mode. When {opt plot_type()} is supplied, it overrides
+auto-detection: {cmd:plot_type(CATT)} pulls the 10-column matrix from
+{cmd:e(results)} (useful after {cmd:aggte_gt}, which preserves the
+upstream CATT object), while {cmd:plot_type(Aggregated)} pulls the
+9-column matrix from {cmd:e(Estimate)}.
 
 {pstd}
-Confidence bands are selected automatically: bootstrap-based uniform bands
-(ci2) are used when available; otherwise analytical bands (ci1) are used.
-
-{pstd}
-If {opt plot_type(string)} is specified, {cmd:catt_gt_graph} first selects the
-matching result object before checking dimensions:
-{cmd:plot_type(CATT)} looks for the CATT matrix in {cmd:e(results)}, while
-{cmd:plot_type(Aggregated)} looks for the aggregated matrix in {cmd:e(Estimate)}.
-This allows users to revisit the original CATT plots even after running
-{helpb aggte_gt}.
-
-{pstd}
-When pre-trends testing was requested ({cmd:pretrend} option in {helpb catt_gt}),
-a dashed red zero reference line is added to all plots.
+Confidence bands are selected panel by panel. Bootstrap uniform bands
+(the {cmd:ci2} columns) are used whenever they are non-missing for every
+point on the panel; otherwise the analytical bands ({cmd:ci1}) are
+used. When pre-trends testing was requested via {opt pretrend} on the
+upstream estimator, a red dashed zero reference line is added to every
+plot.
 
 
 {marker options}{...}
 {title:Options}
 
 {phang}
-{opt plot_type(string)} overrides the auto-detected plot mode. Must be
-{cmd:CATT} (requires 10-column matrix) or {cmd:Aggregated} (requires 9-column
-matrix). If omitted, the mode is determined automatically from the preferred
-results matrix dimensions. If specified, the command searches the corresponding
-stored result first ({cmd:e(results)} for {cmd:CATT}; {cmd:e(Estimate)} for
-{cmd:Aggregated}).
+{opt plot_type(string)} overrides the auto-detected plot mode. Accepts
+{cmd:CATT} or {cmd:Aggregated}; quoted forms such as {cmd:plot_type("CATT")}
+are also accepted. {cmd:CATT} requires a 10-column matrix and reads from
+{cmd:e(results)}; {cmd:Aggregated} requires a 9-column matrix and reads
+from {cmd:e(Estimate)}. When omitted, the mode is inferred from the
+preferred results matrix dimensions.
 
 {phang}
-{opt save_path(string)} specifies a file path to save the last generated graph.
-Supported formats include {cmd:.png}, {cmd:.pdf}, and {cmd:.gph}. Paths ending
-in {cmd:.gph} are saved with Stata's {cmd:graph save}; other supported suffixes
-are exported with {cmd:graph export}.
+{opt save_path(string)} specifies a file path for the last generated
+graph. Paths ending in {cmd:.gph} are saved with {helpb graph save};
+other suffixes such as {cmd:.png} and {cmd:.pdf} are exported with
+{helpb graph export}. The full path (absolute or relative) is honored
+verbatim.
 
 {phang}
-{opt graph_opt(string)} passes additional options to the underlying Stata
-{cmd:twoway} graph command. These are appended to the default graph options.
-For example: {cmd:graph_opt(xlabel(, format(%4.1f)))}.
+{opt graph_opt(string)} passes additional options to the underlying
+{helpb twoway} command. Options are appended to the defaults listed in
+the Remarks section. For example,
+{cmd:graph_opt(xlabel(, format(%4.1f)))} sets a custom x-axis format.
 
 
 {marker examples}{...}
 {title:Examples}
 
-{pstd}Setup (safe non-bootstrap base){p_end}
+{pstd}Setup: deterministic (analytical-CI-only) CATT base.{p_end}
 {phang2}{cmd:. didhetero_simdata, n(500) tau(4) seed(12345) clear}{p_end}
-{phang2}{cmd:. catt_gt Y, group(G) time(period) id(id) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) bstrap(false) uniformall(true)}{p_end}
-{phang2}{it:// The setup above uses the deterministic (analytical-CI-only) base}{p_end}
+{phang2}{cmd:. catt_gt Y, group(G) time(period) id(id) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 -0.4 0 0.4 0.8) bstrap(false)}{p_end}
 
-{pstd}Example 1: Plot CATT estimates (one graph per (g,t) pair){p_end}
+{pstd}Example 1: Auto-detected CATT plot (one graph per (g,t) pair).{p_end}
 {phang2}{cmd:. catt_gt_graph}{p_end}
 
-{pstd}Example 2: Plot CATT estimates directly after didhetero{p_end}
-{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) zeval(-0.8 -0.4 0 0.4 0.8) gteval(2 2) xformula(Z)}{p_end}
+{pstd}Example 2: Force CATT mode directly after {helpb didhetero}.{p_end}
+{phang2}{cmd:. didhetero Y, id(id) time(period) group(G) z(Z) ///}{p_end}
+{phang2}{cmd:        zeval(-0.8 -0.4 0 0.4 0.8) gteval(2 2) xformula(Z) ///}{p_end}
+{phang2}{cmd:        bstrap(false)}{p_end}
 {phang2}{cmd:. catt_gt_graph, plot_type(CATT)}{p_end}
 
-{pstd}Example 3: Plot aggregated estimates after aggte_gt{p_end}
-{phang2}{cmd:. aggte_gt, type(dynamic)}{p_end}
-{phang2}{cmd:. catt_gt_graph}{p_end}
+{pstd}Example 3: Plot aggregated estimates after {helpb aggte_gt}.{p_end}
+{phang2}{cmd:. aggte_gt, type(dynamic) bstrap(false)}{p_end}
+{phang2}{cmd:. catt_gt_graph, plot_type(Aggregated)}{p_end}
 
-{pstd}Example 4: Save graph to file{p_end}
+{pstd}Example 4: Recover the original CATT plot after aggregation.{p_end}
+{phang2}{cmd:. aggte_gt, type(dynamic) bstrap(false)}{p_end}
+{phang2}{cmd:. catt_gt_graph, plot_type(CATT)}{p_end}
+
+{pstd}Example 5: Save the last graph to a file.{p_end}
 {phang2}{cmd:. catt_gt_graph, save_path(my_catt_plot.png)}{p_end}
 
-{pstd}Example 5: Custom graph options{p_end}
+{pstd}Example 6: Custom twoway options.{p_end}
 {phang2}{cmd:. catt_gt_graph, graph_opt(scheme(s2color) xlabel(, format(%4.1f)))}{p_end}
 
 
@@ -128,22 +127,39 @@ For example: {cmd:graph_opt(xlabel(, format(%4.1f)))}.
 {title:Remarks}
 
 {pstd}
-Default graph style settings:
+Default graph style settings used by {cmd:catt_gt_graph}:
 
 {p2colset 9 30 32 2}{...}
 {p2col:Element}Default{p_end}
 {p2line}
-{p2col:CI band color}gs12 at 60% opacity{p_end}
+{p2col:CI band color}{cmd:gs12} at 60% opacity{p_end}
 {p2col:Estimate line}black, very thick{p_end}
 {p2col:Plot region}white background{p_end}
 {p2col:Legend}off{p_end}
-{p2col:Pre-trend line}red dashed at y=0{p_end}
+{p2col:Pre-trend line}red dashed at {it:y} = 0{p_end}
 {p2line}
 
 {pstd}
-Graph names follow the pattern {cmd:g{it:G}_t{it:T}} in CATT mode and
-{cmd:eval{it:E}} in Aggregated mode (with decimals replaced by underscores
-and negative signs replaced by {cmd:m}).
+The graph name pattern is {cmd:g{it:G}_t{it:T}} in CATT mode and
+{cmd:eval{it:E}} in Aggregated mode, with decimal points replaced by
+underscores and negative signs replaced by the letter {cmd:m}. For
+example, CATT at {it:g} = 2, {it:t} = 3 becomes graph
+{cmd:g2_t3}; an aggregated plot at eval = -0.5 becomes {cmd:evalm0_5}.
+These names are reusable with {helpb graph use} or {helpb graph combine}
+after the command returns.
+
+{pstd}
+Confidence-band selection is panel-specific. For each (g,t) pair in
+CATT mode or each eval point in Aggregated mode, {cmd:catt_gt_graph}
+checks whether the {cmd:ci2} columns are non-missing across the entire
+panel. If so, the bootstrap uniform band is plotted; otherwise the
+analytical band is used. A summary line reports the choice for each
+panel before plotting.
+
+{pstd}
+{cmd:catt_gt_graph} does not modify {cmd:e()} and can therefore be
+called multiple times in a row with different {opt plot_type()} or
+{opt graph_opt()} values on the same estimation result.
 
 
 {marker stored}{...}

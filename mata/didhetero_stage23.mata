@@ -1,56 +1,51 @@
 mata:
 
 // =============================================================================
-// didhetero_stage23.mata
-// Second/third stage estimation and influence function construction
+// Second and Third Stage Estimation: Influence Function Construction
 //
-// Delegates the core estimation loop (Steps 1-5) to didhetero_catt_core(),
-// then runs SE computation (Step 6) and bootstrap UCB (Step 7) locally.
+// This module implements the doubly robust estimation pipeline for conditional
+// average treatment effects on the treated (CATT). The estimation proceeds
+// in two phases:
 //
-// For each (g,t) pair (via catt_core):
-//   1. Construct intermediate variables
-//   2. Estimate mu_E, mu_F via LLR with MSE-DPI bandwidth
-//   3. Estimate mu_G, mu_R (porder, common bandwidth)
-//   4. Construct A_{i,g,t}(z_r) and B_{i,g,t}(z_r)
-//   5. Compute DR point estimates via LPR on A
+// Phase I (via didhetero_catt_core()):
+//   - Construct intermediate variables
+//   - Estimate nuisance parameters mu_E, mu_F via local linear regression
+//   - Estimate conditional expectations mu_G, mu_R via local polynomial regression
+//   - Construct A_{i,g,t}(z_r) and B_{i,g,t}(z_r) influence functions
+//   - Compute DR point estimates via local polynomial regression on A
 //
-// Locally (after catt_core returns):
-//   6. SE and analytical UCB (per g,t pair)
-//   7. Bootstrap UCB (across all g,t pairs)
+// Phase II (local computation):
+//   - Standard error and analytical uniform confidence bands
+//   - Bootstrap uniform confidence bands
 //
 // Functions:
-//   1. _didhetero_construct_A()  - DR core term A_{i,g,t}(z_r)
-//   2. _didhetero_construct_B()  - Influence function B_{i,g,t}(z_r)
-//   3. didhetero_stage23()       - Main estimation orchestrator
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4.2.1 (DR estimation, Stages 2 and 3)
+//   - _didhetero_construct_A(): Construct DR core term A_{i,g,t}(z_r)
+//   - _didhetero_construct_B(): Construct influence function B_{i,g,t}(z_r)
+//   - didhetero_stage23(): Main estimation orchestrator
 // =============================================================================
 
 
 // -----------------------------------------------------------------------------
 // _didhetero_construct_A()
-// Construct A_{i,g,t}(z_r) for a single (g,t) pair and all zeval points.
+// Construct A_{i,g,t}(z_r) for a single (g,t) pair and all evaluation points.
 //
-// A_i(z_r) = (G_{i,g} / mu_G(z_r) - R_{i,g,t} / mu_R(z_r)) * Y_tilde_i
+// The DR core term is defined as:
+//   A_i(z_r) = (G_{i,g} / mu_G(z_r) - R_{i,g,t} / mu_R(z_r)) * Y_tilde_i
 //
-// Properties:
+// where:
 //   - Treatment group (G=1, R=0): A_i = Y_tilde_i / mu_G(z_r)
 //   - Comparison group (G=0, R>0): A_i = -R_i * Y_tilde_i / mu_R(z_r)
-//   - Other (G=0, R=0): A_i = 0
+//   - Other units (G=0, R=0): A_i = 0
 //
-// Args:
+// Arguments:
 //   G_ig    - n x 1, treatment group indicator
 //   R_g     - n x 1, IPW weight
 //   Y_diff  - n x 1, outcome adjustment Y_tilde
-//   mu_G    - R x 1, conditional mean of G at zeval
-//   mu_R    - R x 1, conditional mean of R at zeval
+//   mu_G    - R x 1, conditional mean of G at evaluation points
+//   mu_R    - R x 1, conditional mean of R at evaluation points
 //
 // Returns:
-//   n x R matrix, A_{i,g,t}(z_r)
-//
-// Paper ref: Section 4.2.1, Eq. 14 (A_{i,g,t} construction)
+//   n x R matrix of A_{i,g,t}(z_r) values
 // -----------------------------------------------------------------------------
 real matrix _didhetero_construct_A(
     real colvector G_ig,
@@ -67,7 +62,6 @@ real matrix _didhetero_construct_A(
     A_mat = J(n, num_zeval, 0)
 
     for (r = 1; r <= num_zeval; r++) {
-        // A_i(z_r) = (G_ig / mu_G[r] - R_g / mu_R[r]) * Y_diff
         A_mat[., r] = (G_ig / mu_G[r] - R_g / mu_R[r]) :* Y_diff
     }
 
@@ -77,15 +71,14 @@ real matrix _didhetero_construct_A(
 
 // -----------------------------------------------------------------------------
 // _didhetero_construct_B()
-// Construct B_{i,g,t}(z_r) for a single (g,t) pair and all zeval points.
+// Construct B_{i,g,t}(z_r) for a single (g,t) pair and all evaluation points.
 //
-// B_i(z_r) = A_i(z_r) + (mu_E(z_r) / mu_R(z_r)^2) * R_{i,g,t}
+// The influence function with Hajek bias correction is defined as:
+//   B_i(z_r) = A_i(z_r) + (mu_E(z_r) / mu_R(z_r)^2) * R_{i,g,t}
 //                      - (mu_F(z_r) / mu_G(z_r)^2) * G_{i,g}
 //
-// This is the full influence function (Paper Eq. 14) with Hajek bias correction.
-//
-// Args:
-//   A_mat   - n x R matrix, A_{i,g,t}(z_r)
+// Arguments:
+//   A_mat   - n x R matrix of A_{i,g,t}(z_r)
 //   G_ig    - n x 1, treatment group indicator
 //   R_g     - n x 1, IPW weight
 //   mu_G    - R x 1, conditional mean of G
@@ -94,9 +87,7 @@ real matrix _didhetero_construct_A(
 //   mu_F    - R x 1, conditional mean of F
 //
 // Returns:
-//   n x R matrix, B_{i,g,t}(z_r)
-//
-// Paper ref: Section 4.2.2 (B_{i,g,t} residual construction)
+//   n x R matrix of B_{i,g,t}(z_r) values
 // -----------------------------------------------------------------------------
 real matrix _didhetero_construct_B(
     real matrix A_mat,
@@ -115,8 +106,6 @@ real matrix _didhetero_construct_B(
     B_mat = J(n, num_zeval, 0)
 
     for (r = 1; r <= num_zeval; r++) {
-        // B_i(z_r) = A_i(z_r) + (mu_E[r] / mu_R[r]^2) * R_g
-        //                      - (mu_F[r] / mu_G[r]^2) * G_ig
         B_mat[., r] = A_mat[., r] ///
             + (mu_E[r] / mu_R[r]^2) * R_g ///
             - (mu_F[r] / mu_G[r]^2) * G_ig
@@ -128,29 +117,32 @@ real matrix _didhetero_construct_B(
 
 // -----------------------------------------------------------------------------
 // didhetero_stage23()
-// Execute the second/third stage estimation loop.
+// Main estimation orchestrator for the second and third stages.
 //
-// Delegates the core estimation (Steps 1-5) to didhetero_catt_core():
-//   1. Construct intermediate variables via didhetero_intermediate_vars()
-//   2. Estimate mu_E, mu_F via LLR with MSE-DPI bandwidth
-//   3. Estimate mu_G, mu_R using porder and common bandwidth bw[id_gt]
-//   4. Construct A and B influence functions
-//   5. Compute DR point estimates via LPR on A (per zeval point)
+// This function coordinates the doubly robust estimation pipeline by delegating
+// core computations to didhetero_catt_core() and then computing inference
+// quantities locally. The workflow comprises:
 //
-// Then runs SE and bootstrap locally:
-//   6. SE and analytical UCB (per g,t pair)
-//   7. Bootstrap UCB (across all g,t pairs)
+// Core estimation (via didhetero_catt_core()):
+//   - Construct intermediate variables
+//   - Estimate nuisance parameters mu_E, mu_F via local linear regression
+//   - Estimate conditional expectations mu_G, mu_R via local polynomial regression
+//   - Construct A_{i,g,t}(z_r) and B_{i,g,t}(z_r) influence functions
+//   - Compute DR point estimates via local polynomial regression on A
 //
-// Args:
+// Inference computation (local):
+//   - Standard errors and analytical uniform confidence bands (per group-time pair)
+//   - Bootstrap uniform confidence bands (across all group-time pairs)
+//
+// Arguments:
 //   data          - DidHeteroData struct (modified in place)
-//   gps_mat       - GPS result matrix from Stage 1
-//   or_mat        - OR result matrix from Stage 1
-//   bw            - K x 1 common bandwidth vector (already resolved)
-//   bwselect      - bandwidth selection method string (unused after refactor;
-//                   catt_core is always called with "manual" since BW is resolved)
-//   seed          - bootstrap RNG seed; applied only when bootstrap runs
+//   gps_mat       - Generalized propensity score matrix from Stage 1
+//   or_mat        - Outcome regression matrix from Stage 1
+//   bw            - K x 1 common bandwidth vector (pre-resolved)
+//   bwselect      - bandwidth selection method string (for interface compatibility)
+//   seed          - bootstrap RNG seed (applied when bootstrap is requested)
 //
-// Modifies in place (via data struct):
+// Modified fields (via data struct):
 //   data.A_g_t    - 1 x K pointer array, each n x num_zeval
 //   data.B_g_t    - 1 x K pointer array, each n x num_zeval
 //   data.G_g      - n x K group indicator matrix
@@ -158,8 +150,6 @@ real matrix _didhetero_construct_B(
 //
 // Returns:
 //   num_zeval x K matrix of DR point estimates
-//
-// Paper ref: Section 4.2.1, Stages 2-3 (DR estimation pipeline)
 // -----------------------------------------------------------------------------
 real matrix didhetero_stage23(
     struct DidHeteroData scalar data,
@@ -184,11 +174,11 @@ real matrix didhetero_stage23(
     num_zeval = data.num_zeval
 
     // =====================================================================
-    // Steps 1-5: Core CATT estimation via didhetero_catt_core()
-    // Delegates intermediate vars, mu_E/F/G/R estimation, A/B construction,
-    // and DR point estimates to the reentrant core function.
-    // BW is already resolved (by didhetero_bw_preloop or user), so we
-    // always call with bwselect="manual".
+    // Core CATT estimation via didhetero_catt_core()
+    // Delegates intermediate variable construction, nuisance parameter
+    // estimation, influence function construction, and DR point estimation
+    // to the reentrant core function. Bandwidth is pre-resolved, hence
+    // bwselect="manual" is specified.
     // =====================================================================
     catt_result = didhetero_catt_core(data, gps_mat, or_mat,
                       data.gteval, bw, "manual", data.porder, data.kernel)
@@ -213,9 +203,9 @@ real matrix didhetero_stage23(
     has_kd0_Z = (rows(data.kd0_Z) == num_zeval)
 
     // =====================================================================
-    // Step 6: SE and analytical UCB (Paper Section 4.2.2-4.2.3)
-    // Loop over (g,t) pairs; uses B_g_t and est from catt_core results.
-    // Only computed when kd0_Z is available from Stage 1.
+    // Standard errors and analytical uniform confidence bands
+    // Loop over group-time pairs using B_g_t and estimates from core results.
+    // Computed only when kd0_Z is available from Stage 1.
     // =====================================================================
     for (id_gt = 1; id_gt <= K; id_gt++) {
         if (has_kd0_Z) {
@@ -237,20 +227,18 @@ real matrix didhetero_stage23(
             data.c_hat[id_gt] = se_c_hat_gt
 
             // =================================================================
-            // Positivity post-guard: zero out SE and CI for zeval points where
-            // the GPS (mu_G = E[G_ig | Z=z_r]) is below a minimum threshold.
+            // Positivity guard for standard errors and confidence intervals
             //
-            // When zeval[r] lies far outside the treated cohort's support,
-            // mu_G[r] \u2248 0 causes the DR influence function (B_i \u221d 1/mu_G) to
-            // blow up. The sigma2_raw<0 guard in didhetero_se catches downward
-            // extrapolation (SE=.) but NOT the upward case (SE=huge).
+            // When the generalized propensity score mu_G = E[G_ig | Z=z_r] falls
+            // below a threshold, the overlap assumption is violated and the
+            // CATT is not point-identified at that evaluation point. The
+            // influence function B_i is inversely proportional to mu_G, so
+            // small values cause variance inflation.
             //
-            // Direct positivity check: if mu_G[r, id_gt] < eps_pos, the overlap
-            // assumption fails at z_r and the CATT is not point-identified there.
-            // Setting SE=. (and CI=.) correctly communicates this to the user.
-            //
-            // Threshold eps_pos = 1e-3: flags GPS below 0.1%, safe margin
-            // above typical minimum GPS at interior zeval (~5-30%).
+            // The threshold eps_pos = 1e-3 identifies GPS values below 0.1%,
+            // indicating evaluation points outside the treated cohort's support.
+            // Standard errors and confidence intervals are set to missing to
+            // indicate lack of point identification.
             // =================================================================
             eps_pos = 1e-3
             n_pos_missing = 0
@@ -273,17 +261,16 @@ real matrix didhetero_stage23(
     }
 
     // =================================================================
-    // Step 7: Bootstrap UCB (Paper Section 4.2.4)
-    // When biters > 0, run weighted bootstrap for uniform confidence bands.
-    // Otherwise, set CI2 fields to missing.
+    // Bootstrap uniform confidence bands
+    // When bootstrap iterations (biters) are specified, compute uniform
+    // confidence bands via weighted bootstrap. Otherwise, set CI2 fields
+    // to missing values.
     // =================================================================
     if (data.biters > 0) {
         if (seed >= 0 & seed < .) {
             rseed(seed)
         }
 
-        // Use optimized bootstrap with precompute + batched weights
-        // Semantics are identical to didhetero_bootstrap_ucb().
         didhetero_boot_ucb_optimized(
             data.A_g_t, est, data.se, bw, data.Z, data.zeval,
             n, data.porder, data.kernel, data.alp, data.biters,

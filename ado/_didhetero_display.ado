@@ -1,6 +1,4 @@
-*! _didhetero_display.ado
-*! Display CATT estimation results in a formatted table
-*! Shared by didhetero.ado and catt_gt.ado
+*! Display CATT estimation results in formatted tables
 
 program define _didhetero_display
     version 16.0

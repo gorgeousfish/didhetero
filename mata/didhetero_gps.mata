@@ -1,17 +1,17 @@
 mata:
 
 // =============================================================================
-// didhetero_gps.mata
-// GPS (Generalized Propensity Score) estimation via Logit
+// Generalized Propensity Score (GPS) Estimation
+//
+// This module implements GPS estimation via logistic regression using
+// iteratively reweighted least squares (IRLS). The GPS is used to adjust
+// for covariate imbalance between treated and control units in heterogeneous
+// treatment effect estimation.
 //
 // Functions:
-//   1. didhetero_invlogit()      - Numerically stable inverse logit
-//   2. didhetero_gps_logit()     - Logit IRLS/Newton-Raphson core
-//   3. didhetero_gps_estimate()  - GPS dispatch (nevertreated/notyettreated)
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4.2.1 (GPS estimation via logistic regression)
+//   - didhetero_invlogit()      : Numerically stable inverse logit function
+//   - didhetero_gps_logit()     : Logit estimation via IRLS/Newton-Raphson
+//   - didhetero_gps_estimate()  : GPS estimation dispatch for treatment groups
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -61,8 +61,6 @@ real colvector didhetero_invlogit(real colvector x)
 //
 // Returns:
 //   n x 1 predicted probabilities truncated to [1e-12, 1-1e-12]
-//
-// Paper ref: Section 4.2.1, GPS logistic estimation
 // -----------------------------------------------------------------------------
 real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
                                     real matrix X_full, real colvector pi_hat)
@@ -76,61 +74,61 @@ real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
     n_full = rows(X_full)
     k      = cols(X_sub)
     
-    // Initialize coefficients to zero
+    // Initialize coefficients at zero
     pi_hat = J(k, 1, 0)
     
-    // IRLS parameters
+    // Algorithm parameters
     max_iter  = 25
     tol       = 1e-8
     converged = 0
     
-    // Pre-loop check: y_sub must have variation (not all 0 or all 1)
+    // Verify outcome variation for model identification
     if (sum(y_sub) == 0 | sum(y_sub) == n_sub) {
         _error("GPS logit: y_sub has no variation (all 0 or all 1)")
     }
     
-    // IRLS / Newton-Raphson loop
+    // IRLS-Newton iteration
     for (iter = 1; iter <= max_iter; iter++) {
         
-        // Step 1: Predicted probabilities on subset
+        // Compute predicted probabilities
         p_sub = didhetero_invlogit(X_sub * pi_hat)
         
-        // Step 2: Truncate to [1e-12, 1-1e-12]
+        // Truncate to avoid numerical boundary issues
         p_sub = rowmax((J(n_sub, 1, 1e-12), rowmin((J(n_sub, 1, 1-1e-12), p_sub))))
         
-        // Step 3: Weights
+        // Construct IRLS weights
         w = p_sub :* (1 :- p_sub)
         
-        // Step 4: Score = X'(y - p)
+        // Compute score vector
         score = cross(X_sub, (y_sub - p_sub))
         
-        // Step 5: Hessian = X'diag(w)X
+        // Compute Hessian matrix
         H = cross(X_sub, w, X_sub)
         
-        // Step 6: Newton step via LU solve
+        // Solve for parameter update
         delta = lusolve(H, score)
         
-        // Check for singular matrix (lusolve returns missing)
+        // Check for singular Hessian
         if (hasmissing(delta)) {
             _error("GPS logit: singular Hessian matrix at iteration " + strofreal(iter))
         }
         
-        // Step 7: Check separation
+        // Check for perfect or quasi-separation
         if (min(p_sub) > 1 - 1e-6 | max(p_sub) < 1e-6) {
             _error("GPS logit: perfect or quasi-separation detected at iteration " + strofreal(iter))
         }
         
-        // Step 8: Update coefficients
+        // Update parameter estimates
         pi_hat = pi_hat + delta
         
-        // Step 9: Convergence check
+        // Check convergence criterion
         if (max(abs(delta)) < tol) {
             converged = 1
             break
         }
     }
     
-    // Post-loop: warn if not converged (do not error)
+    // Warn if convergence not achieved
     if (converged == 0) {
         printf("{txt}Warning: GPS logit did not converge in %g iterations\n", max_iter)
     }
@@ -146,25 +144,26 @@ real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
 
 // -----------------------------------------------------------------------------
 // didhetero_gps_estimate()
-// GPS estimation dispatch for all groups/pairs.
-// Loops over treatment groups (nevertreated) or (g,t) pairs (notyettreated),
-// estimates logit GPS on each subset, and predicts on full sample.
+// GPS estimation dispatch for treatment groups.
+//
+// For each treatment group (nevertreated control) or each (g,t) pair
+// (not-yet-treated control), estimates a separate logistic regression
+// for the GPS and predicts on the full sample.
 //
 // Args:
-//   data          - DidHeteroData struct
+//   data          - DidHeteroData struct containing panel data
 //   gteval        - K x 2 matrix of valid (g,t) pairs
 //   geval         - K_g x 1 vector of valid treatment groups
 //   control_group - "nevertreated" or "notyettreated"
-//   anticipation  - anticipation periods (integer >= 0)
+//   anticipation  - Anticipation periods (integer >= 0)
 //   gps_coef      - (OUTPUT) Logit coefficient matrix
 //
 // Returns:
-//   GPS result matrix (long format):
-//     nevertreated:  (id, g, p_hat)     — 3 columns per block
-//     notyettreated: (id, g, t, p_hat)  — 4 columns per block
-//
-// Paper ref: Section 4.2.1, GPS estimation dispatch
+//   GPS matrix in long format:
+//     nevertreated:  (id, g, p_hat)      - 3 columns
+//     notyettreated: (id, g, t, p_hat)   - 4 columns
 // -----------------------------------------------------------------------------
+
 real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
                                     real matrix gteval,
                                     real colvector geval,
@@ -188,8 +187,7 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
     
     if (control_group == "nevertreated") {
         // =====================================================================
-        // Nevertreated: loop over unique g values
-        // Nevertreated: one GPS per unique group g
+        // Never-treated control: estimate one GPS per treatment group
         // =====================================================================
         n_g = rows(geval)
         gps_mat  = J(0, 3, .)
@@ -200,8 +198,6 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
             
             // Subset: units in group g1 or never-treated (G==0)
             subset_mask = (G :== g1) :| (G :== 0)
-            
-            // didhetero_selectindex takes a colvector
             idx_sub = didhetero_selectindex(subset_mask)
             
             if (cols(idx_sub) == 0) {
@@ -225,8 +221,7 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
     }
     else if (control_group == "notyettreated") {
         // =====================================================================
-        // Notyettreated: loop over each (g,t) pair
-        // Notyettreated: one GPS per (g,t) pair
+        // Not-yet-treated control: estimate one GPS per (g,t) pair
         // =====================================================================
         n_gt = rows(gteval)
         gps_mat  = J(0, 4, .)
@@ -247,15 +242,12 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
             g1 = gteval[j, 1]
             t1 = gteval[j, 2]
             
-            // Appendix D uses D_{t+delta} = 0, which depends on the ordinal
-            // position of t within the observed time support.
+            // Compute threshold period for not-yet-treated subset construction
             threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
             
             // Subset: units in group g1, never-treated (G==0), or not-yet-treated
             // units whose treatment starts strictly after the threshold period.
             subset_mask = (G :== g1) :| (G :== 0) :| (G_ord :> threshold_ord)
-            
-            // didhetero_selectindex takes a colvector
             idx_sub = didhetero_selectindex(subset_mask)
             
             if (cols(idx_sub) == 0) {

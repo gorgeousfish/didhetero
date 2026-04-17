@@ -1,8 +1,6 @@
-*! didhetero_simdata.ado
-*! Version 0.1.0
+*! didhetero_simdata
 *!
-*! Generate simulation data following the DGP in Section 6 of
-*! Imai, Qin, and Yanagi (2025).
+*! Generate simulation data for heterogeneous staggered DiD designs.
 *!
 *! Syntax:
 *!   didhetero_simdata, n(integer) tau(integer) [seed(integer) hc dimx(integer 1)
@@ -67,8 +65,6 @@ program define didhetero_simdata, rclass
     // Step 3: Check data in memory
     // =========================================================================
     if "`clear'" == "" {
-        // Protect any existing dataset structure, including zero-observation
-        // datasets that still carry variables and would be overwritten.
         if c(k) > 0 | c(N) > 0 {
             display as error "data in memory would be lost; specify clear option"
             exit 4
@@ -84,14 +80,11 @@ program define didhetero_simdata, rclass
     // =========================================================================
     // Step 5: Ensure Mata backend is available
     // =========================================================================
-    // Use the shared backend loader first (handles mlib index + source fallback)
     capture noisily _dh_ensure_backend
     if _rc {
-        // Fall back to the simdata-specific loader
         quietly _didhetero_simdata_ensure_loaded
     }
     else {
-        // Verify simdata function is available after shared loader
         capture quietly mata: mata describe _didhetero_simdata_to_stata()
         if _rc {
             quietly _didhetero_simdata_ensure_loaded
@@ -112,7 +105,6 @@ program define didhetero_simdata, rclass
     local nobs = `n' * `tau'
     tempfile simdata_tmp
 
-    // Preserve the caller's dataset until replacement data are fully generated.
     preserve
     clear
 
@@ -217,21 +209,17 @@ end
 program define _didhetero_simdata_ensure_loaded
     version 16.0
 
-    // Prefer already-loaded Mata code.
     capture quietly mata: mata which _didhetero_simdata_to_stata()
     if !_rc {
         exit
     }
 
-    // If a packaged mlib is available on adopath, indexing should expose it.
     capture quietly mata: mata mlib index
     capture quietly mata: mata which _didhetero_simdata_to_stata()
     if !_rc {
         exit
     }
 
-    // Fall back to the source .mata file so ado-only users do not need a
-    // prebuilt library artifact or a manual indexing step.
     quietly findfile didhetero_simdata.ado
     local ado_file `"`r(fn)'"'
     local mata_file = subinstr(`"`ado_file'"', "didhetero_simdata.ado", "../mata/didhetero_simdata.mata", 1)

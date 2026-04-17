@@ -1,59 +1,51 @@
 mata:
 
 // =============================================================================
-// didhetero_intermediate.mata
-// Intermediate variable construction for DR estimator
+// Intermediate variable construction for doubly robust estimation
 //
-// Constructs R_{i,g,t}, Y_tilde, E_{i,g,t}, F_{i,g,t} for each (g,t) pair.
+// This module constructs the intermediate quantities required for computing
+// CATT estimates: the weighting variable R, the adjusted outcome difference
+// Y_tilde, and the products E and F.
 //
 // Functions:
-//   1. _didhetero_extract_gps()       - Extract GPS for a specific (g,[t]) pair
-//   2. _didhetero_extract_or()        - Extract OR for a specific (g,t) pair
-//   3. didhetero_intermediate_vars()  - Main: construct all intermediate vars
+//   _didhetero_extract_gps()       - Extract GPS estimates for a given (g,t)
+//   _didhetero_extract_or()        - Extract outcome regression predictions
+//   didhetero_intermediate_vars()  - Construct all intermediate variables
 //
-// Structs:
+// Structure:
 //   DidHeteroIntermediate - Container for intermediate variables
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4.2.1 (intermediate variable construction)
 // =============================================================================
 
 // -----------------------------------------------------------------------------
 // DidHeteroIntermediate
 // Container for intermediate variables at a single (g,t) pair.
-//
-// All vectors are n x 1 (one entry per cross-sectional unit).
-//
-// Paper ref: Section 4.2.1, Eq. 14 (intermediate variable definitions)
+// All vectors are n x 1, where n is the number of cross-sectional units.
 // -----------------------------------------------------------------------------
 struct DidHeteroIntermediate {
-    real colvector R_g      // n x 1, R_{i,g,t} = p_hat * comp_ind / (1 - p_hat)
-    real colvector Y_diff   // n x 1, Y_tilde_{i,g,t} = Y_t - Y_base - m_hat
-    real colvector E_g_t    // n x 1, E_{i,g,t} = R_g * Y_diff
-    real colvector F_g_t    // n x 1, F_{i,g,t} = G_ig * Y_diff
-    real colvector G_ig     // n x 1, G_{i,g} indicator (1 if unit i in group g)
+    real colvector R_g      // n x 1, weighting variable R_{i,g,t}
+    real colvector Y_diff   // n x 1, adjusted outcome difference Y_tilde
+    real colvector E_g_t    // n x 1, product E_{i,g,t} = R_{i,g,t} * Y_tilde
+    real colvector F_g_t    // n x 1, product F_{i,g,t} = G_{i,g} * Y_tilde
+    real colvector G_ig     // n x 1, group membership indicator G_{i,g}
 }
 
 // -----------------------------------------------------------------------------
 // _didhetero_extract_gps()
-// Extract GPS estimates for a specific group (and time, if notyettreated).
+// Extract generalized propensity score estimates for a specific (g,t) pair.
 //
-// GPS matrix format:
-//   nevertreated:  3 columns (id, g, est)
-//   notyettreated: 4 columns (id, g, t, est)
+// The GPS matrix has distinct structures depending on the control group:
+//   - nevertreated:  3 columns (id, g, estimate)
+//   - notyettreated: 4 columns (id, g, t, estimate)
 //
-// Args:
-//   gps_mat       - GPS result matrix from didhetero_gps_estimate()
-//   g1            - target group value
-//   t1            - target time value (used only for notyettreated)
-//   control_group - "nevertreated" or "notyettreated"
-//   n             - expected number of rows in output
+// Arguments:
+//   gps_mat       - matrix containing GPS estimation results
+//   g1            - target group identifier
+//   t1            - target time period (relevant for not-yet-treated)
+//   control_group - control group type ("nevertreated" or "notyettreated")
+//   n             - expected number of observations
 //
 // Returns:
-//   n x 1 vector of GPS estimates p_hat
-//
-// Paper ref: Section 4.2.1 (GPS extraction for DR estimand)
+//   n x 1 vector of GPS estimates
 // -----------------------------------------------------------------------------
 real colvector _didhetero_extract_gps(
     real matrix gps_mat,
@@ -67,8 +59,8 @@ real colvector _didhetero_extract_gps(
     real scalar n_extracted
 
     if (control_group == "nevertreated") {
-        // GPS matrix: (id, g, est) — 3 columns
-        // Filter: column 2 == g1
+        // GPS matrix with 3 columns: (id, g, estimate)
+        // Select rows where the group column matches g1
         mask = (gps_mat[., 2] :== g1)
         idx = didhetero_selectindex(mask)
 
@@ -79,8 +71,8 @@ real colvector _didhetero_extract_gps(
         p_hat = gps_mat[idx', 3]
     }
     else {
-        // GPS matrix: (id, g, t, est) — 4 columns
-        // Filter: column 2 == g1 AND column 3 == t1
+        // GPS matrix with 4 columns: (id, g, t, estimate)
+        // Select rows where group equals g1 and time equals t1
         mask = (gps_mat[., 2] :== g1) :& (gps_mat[., 3] :== t1)
         idx = didhetero_selectindex(mask)
 
@@ -92,7 +84,7 @@ real colvector _didhetero_extract_gps(
         p_hat = gps_mat[idx', 4]
     }
 
-    // Validate row count
+    // Verify the number of extracted rows matches expected count
     n_extracted = rows(p_hat)
     if (n_extracted != n) {
         _error("GPS extract: expected " + strofreal(n) + " rows but got " +
@@ -105,20 +97,18 @@ real colvector _didhetero_extract_gps(
 
 // -----------------------------------------------------------------------------
 // _didhetero_extract_or()
-// Extract OR predicted values for a specific (g,t) pair.
+// Extract outcome regression predictions for a specific (g,t) pair.
 //
-// OR matrix format: always 4 columns (id, g, t, est)
+// The OR matrix has 4 columns: (id, g, t, prediction).
 //
-// Args:
-//   or_mat - OR result matrix from didhetero_or_estimate()
-//   g1     - target group value
-//   t1     - target time value
-//   n      - expected number of rows in output
+// Arguments:
+//   or_mat - matrix containing outcome regression predictions
+//   g1     - target group identifier
+//   t1     - target time period
+//   n      - expected number of observations
 //
 // Returns:
-//   n x 1 vector of OR predicted values m_hat
-//
-// Paper ref: Section 4.2.1 (OR extraction for DR estimand)
+//   n x 1 vector of predicted values
 // -----------------------------------------------------------------------------
 real colvector _didhetero_extract_or(
     real matrix or_mat,
@@ -130,8 +120,8 @@ real colvector _didhetero_extract_or(
     real rowvector idx
     real scalar n_extracted
 
-    // OR matrix: (id, g, t, est) — always 4 columns
-    // Filter: column 2 == g1 AND column 3 == t1
+    // OR matrix with 4 columns: (id, g, t, prediction)
+    // Select rows where group equals g1 and time equals t1
     mask = (or_mat[., 2] :== g1) :& (or_mat[., 3] :== t1)
     idx = didhetero_selectindex(mask)
 
@@ -142,7 +132,7 @@ real colvector _didhetero_extract_or(
 
     m_hat = or_mat[idx', 4]
 
-    // Validate row count
+    // Verify the number of extracted rows matches expected count
     n_extracted = rows(m_hat)
     if (n_extracted != n) {
         _error("OR extract: expected " + strofreal(n) + " rows but got " +
@@ -157,27 +147,25 @@ real colvector _didhetero_extract_or(
 // didhetero_intermediate_vars()
 // Construct all intermediate variables for a single (g,t) pair.
 //
-// Implements the DR estimator building blocks:
-//   R_{i,g,t}     = p_hat * comp_ind / (1 - p_hat)
-//   Y_tilde       = Y_t - Y_{g-delta-1} - m_hat
-//   E_{i,g,t}     = R_{i,g,t} * Y_tilde
-//   F_{i,g,t}     = G_{i,g} * Y_tilde
+// This function computes the components required for CATT estimation:
+//   R_{i,g,t} = p_hat * comp_ind / (1 - p_hat)
+//   Y_tilde   = Y_t - Y_{g-delta-1} - m_hat
+//   E_{i,g,t} = R_{i,g,t} * Y_tilde
+//   F_{i,g,t} = G_{i,g} * Y_tilde
 //
-// Args:
-//   data          - DidHeteroData struct (panel data)
-//   gps_mat       - GPS result matrix from Stage 1
-//   or_mat        - OR result matrix from Stage 1
-//   g1            - target group value
-//   t1            - target time value
-//   id_gt         - 1-based index of this (g,t) pair in gteval
-//   control_group - "nevertreated" or "notyettreated"
-//   anticipation  - anticipation parameter delta >= 0
-//   G_g           - n x num_gteval matrix (modified in place: column id_gt set)
+// Arguments:
+//   data          - panel data structure
+//   gps_mat       - matrix of GPS estimates
+//   or_mat        - matrix of outcome regression predictions
+//   g1            - target group identifier
+//   t1            - target time period
+//   id_gt         - index of the (g,t) pair in the evaluation set
+//   control_group - control group type ("nevertreated" or "notyettreated")
+//   anticipation  - anticipation period (delta >= 0)
+//   G_g           - matrix storing group indicators (modified in place)
 //
 // Returns:
-//   DidHeteroIntermediate scalar with all fields populated
-//
-// Paper ref: Section 4.2.1, Eq. 14 (full intermediate variable construction)
+//   structure containing all intermediate variables
 // -----------------------------------------------------------------------------
 struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     struct DidHeteroData scalar data,
@@ -195,26 +183,20 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     real colvector Y_t, Y_base, m_hat, Y_diff
     real scalar col_t, col_base, threshold_ord, base_label, i
 
-    // =========================================================================
-    // Step 1: Extract GPS estimates for this (g,t) pair
-    // Paper ref: Section 4.2.1, GPS estimation
-    // =========================================================================
+    // Extract GPS estimates for the current (g,t) pair
     p_hat = _didhetero_extract_gps(gps_mat, g1, t1, control_group, data.n)
 
-    // =========================================================================
-    // Step 2: Construct indicator variables
-    // Paper ref: Section 4.2.1, indicator variables
-    // =========================================================================
+    // Construct group membership and comparison group indicators
 
-    // G_{i,g}: treatment group indicator
+    // G_{i,g}: indicator for membership in treatment group g
     G_ig = (data.G :== g1)
 
     if (control_group == "nevertreated") {
-        // Comparison group: never-treated only
+        // Comparison group consists of never-treated units only
         comp_ind = (data.G :== 0)
     }
     else {
-        // Comparison group: never-treated + units untreated at t + delta.
+        // Comparison group includes never-treated and not-yet-treated units
         threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
         G_ord = J(rows(data.G), 1, 0)
         for (i = 1; i <= rows(data.G); i++) {
@@ -223,28 +205,18 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
             }
         }
 
-        // comp_ind = 1*(G == 0) + 1*(G > threshold)
-        // These groups are mutually exclusive so addition == logical OR numerically.
+        // Comparison indicator: never-treated or not-yet-treated by t + delta
+        // The two conditions are mutually exclusive
         comp_ind = (data.G :== 0) + (G_ord :> threshold_ord)
     }
 
-    // =========================================================================
-    // Step 3: Construct R_{i,g,t}
-    // Paper ref: Section 4.2.1, Eq. 14
-    // R_{i,g,t} = p_hat * comp_ind / (1 - p_hat)
-    // =========================================================================
+    // Compute the weighting variable R_{i,g,t}
     R_g = (p_hat :* comp_ind) :/ (1 :- p_hat)
 
-    // =========================================================================
-    // Step 4: Store G_{i,g} into G_g matrix (passed by reference)
-    // Store G_{i,g} column for later use in influence functions
-    // =========================================================================
+    // Store group indicator in the G_g matrix for subsequent computations
     G_g[., id_gt] = G_ig
 
-    // =========================================================================
-    // Step 5: Extract outcome variables Y_t and Y_{g-delta-1}
-    // Paper ref: Section 4.2.1 (outcome differencing)
-    // =========================================================================
+    // Extract outcome variables for periods t and g-delta-1
     col_t = didhetero_period_col(t1, data.t_vals)
     base_label = didhetero_period_at(
         didhetero_period_ord(g1, data.t_vals) - anticipation - 1,
@@ -255,32 +227,17 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     Y_t    = data.Y_wide[., col_t]
     Y_base = data.Y_wide[., col_base]
 
-    // =========================================================================
-    // Step 6: Extract OR predicted values m_hat
-    // Paper ref: Section 4.2.1, OR prediction
-    // =========================================================================
+    // Extract outcome regression predictions
     m_hat = _didhetero_extract_or(or_mat, g1, t1, data.n)
 
-    // =========================================================================
-    // Step 7: Construct Y_tilde = Y_t - Y_{g-delta-1} - m_hat
-    // Y_tilde = Y_t - Y_{g-delta-1} - m_hat
-    // =========================================================================
+    // Compute the adjusted outcome difference Y_tilde
     Y_diff = Y_t - Y_base - m_hat
 
-    // =========================================================================
-    // Step 8: Construct E_{i,g,t} and F_{i,g,t}
-    // Paper ref: Section 4.2.1, Eq. 14
-    // E_{i,g,t} = R_{i,g,t} * Y_tilde
-    // F_{i,g,t} = G_{i,g} * Y_tilde
-    // =========================================================================
-
-    // =========================================================================
-    // Pack results into struct
-    // =========================================================================
+    // Assemble results into the output structure
     result.R_g    = R_g
     result.Y_diff = Y_diff
-    result.E_g_t  = R_g :* Y_diff       // E_{i,g,t} = R_{i,g,t} * Y_tilde
-    result.F_g_t  = G_ig :* Y_diff       // F_{i,g,t} = G_{i,g} * Y_tilde
+    result.E_g_t  = R_g :* Y_diff
+    result.F_g_t  = G_ig :* Y_diff
     result.G_ig   = G_ig
 
     return(result)

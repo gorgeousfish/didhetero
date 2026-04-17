@@ -5,13 +5,9 @@ mata:
 // Full estimation pipeline orchestration for didhetero command
 //
 // Functions:
-//   1. didhetero_bw_preloop()      - BW selection pre-loop
+//   1. didhetero_bw_preloop()      - Bandwidth selection pre-loop
 //   2. didhetero_run_from_ado()    - Full pipeline called from didhetero.ado
 //   3. didhetero_post_results()    - Post results to Stata e() and r()
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4 (CATT estimation pipeline)
 // =============================================================================
 
 
@@ -39,9 +35,8 @@ mata:
 //
 // Returns:
 //   K x 1 vector of bandwidths
-//
-// Paper ref: Section 4.2 (bandwidth selection)
 // -----------------------------------------------------------------------------
+
 real colvector didhetero_bw_preloop(
     struct DidHeteroData scalar data,
     real matrix gps_mat,
@@ -73,15 +68,14 @@ real colvector didhetero_bw_preloop(
         else {
             _error("bw must be scalar or vector of length " + strofreal(K))
         }
-        // uniformall or scalar manual: use min
+        // Apply uniform bandwidth constraint
         if (data.uniformall | rows(bw_manual) == 1) {
             bw_vec = J(K, 1, min(bw_vec))
         }
         return(bw_vec)
     }
 
-    // === Initialize arrays for BW selection ===
-    // These will be overwritten by stage23 later
+    // === Initialize arrays for bandwidth selection ===
     data.A_g_t = J(1, K, NULL)
     data.B_g_t = J(1, K, NULL)
     if (rows(data.G_g) != n | cols(data.G_g) != K) {
@@ -141,7 +135,7 @@ real colvector didhetero_bw_preloop(
                     data.mu_G_g[., id_gt], mu_R_col,
                     data.mu_E_g_t[., id_gt], data.mu_F_g_t[., id_gt])
 
-        // Store B (force independent copy to avoid pointer aliasing)
+        // Store matrices by value to prevent pointer aliasing
         data.A_g_t[id_gt] = &(1 * A_mat)
         data.B_g_t[id_gt] = &(1 * B_mat)
     }
@@ -234,9 +228,8 @@ void _didhetero_validate_user_gteval()
 // Side effects:
 //   Overrides _dh_data.gteval, _dh_data.num_gteval
 //   May set _dh_data.uniformall = 0 when num_gteval == 1
-//
-// Paper ref: Section 4.2 (evaluation pair handling)
 // -----------------------------------------------------------------------------
+
 void _didhetero_set_user_gteval()
 {
     external struct DidHeteroData scalar _dh_data
@@ -281,9 +274,8 @@ void _didhetero_set_user_gteval()
 // Side effects:
 //   Modifies external _dh_data with all estimation results.
 //   Creates Stata matrices and scalars for result posting.
-//
-// Paper ref: Section 4.2 (full function)
 // -----------------------------------------------------------------------------
+
 void didhetero_run_from_ado()
 {
     external struct DidHeteroData scalar _dh_data
@@ -319,7 +311,6 @@ void didhetero_run_from_ado()
 
     // =========================================================================
     // Step 1: Build (g,t) evaluation pairs
-    // Paper ref: Section 4.2 (evaluation pair construction)
     // =========================================================================
     // Check if user already specified gteval (via _didhetero_set_user_gteval)
     if (_dh_data.num_gteval == . | _dh_data.num_gteval == 0) {
@@ -327,11 +318,8 @@ void didhetero_run_from_ado()
         didhetero_build_gteval(_dh_data, _dh_data.anticipation,
             _dh_data.control_group, pretrend, uniformall)
 
-        // Update uniformall in struct (ensure single (g,t) forces uniformall=0)
-        // Note: Mata passes scalars by value, so any override within
-        // didhetero_build_gteval() would not propagate back to this caller.
-        // When only one (g,t) pair exists, uniform inference over (g,t,z)
-        // degenerates to z-only, so explicitly force uniformall=0.
+        // Update uniformall in struct; when only one (g,t) pair exists,
+        // uniform inference over (g,t,z) degenerates to z-only
         _dh_data.uniformall = uniformall
         if (_dh_data.num_gteval == 1) {
             _dh_data.uniformall = 0
@@ -346,8 +334,7 @@ void didhetero_run_from_ado()
             pretrend)
 
         printf("{txt}Using user-specified (g,t) evaluation pairs\n")
-        // Still need to compute supp_g, supp_t, period1, geval, teval, gbar
-        // for Stage 1 dispatch
+        // Compute support and auxiliary variables for Stage 1 dispatch
         _dh_data.supp_g = sort(uniqrows(_dh_data.G), 1)
         _dh_data.supp_t = sort(uniqrows(_dh_data.t_vals), 1)
         _dh_data.period1 = _dh_data.t_vals[1]
@@ -355,7 +342,7 @@ void didhetero_run_from_ado()
         // geval: unique g values from gteval
         _dh_data.geval = sort(uniqrows(_dh_data.gteval[., 1]), 1)
 
-        // gbar computation (Paper Section 2)
+        // gbar computation: if never-treated units exist, set gbar to missing
         if (sum(_dh_data.G :== 0) == 0) {
             _dh_data.gbar = max(_dh_data.supp_g)
         }
@@ -368,13 +355,11 @@ void didhetero_run_from_ado()
 
     // =========================================================================
     // Step 2: Initialize core estimation arrays
-    // Paper ref: Section 4.2 (initialization)
     // =========================================================================
     didhetero_init_core_arrays(_dh_data, _dh_data.num_gteval)
 
     // =========================================================================
     // Step 3: Stage 1 — GPS + OR + KDE
-    // Paper ref: Section 4.2.1 (Stage 1 parametric estimation)
     // =========================================================================
     printf("{txt}Stage 1: Parametric estimation (GPS + OR) + KDE...\n")
     s1 = didhetero_stage1_dispatch(_dh_data, _dh_data.gteval, _dh_data.geval,
@@ -385,7 +370,7 @@ void didhetero_run_from_ado()
 
     printf("{txt}  GPS, OR, and density estimation complete\n")
 
-    // Store Stage 1 results as externals for aggte_gt Pass 2
+    // Store Stage 1 results as external globals
     external real matrix _dh_gps_mat
     external real matrix _dh_or_mat
     external real colvector _dh_kd1_Z
@@ -396,7 +381,6 @@ void didhetero_run_from_ado()
 
     // =========================================================================
     // Step 4: Bandwidth selection pre-loop
-    // Paper ref: Section 4.2 (bandwidth selection)
     // =========================================================================
     printf("{txt}Bandwidth selection (%s)...\n", bwselect)
     bw_vec = didhetero_bw_preloop(_dh_data, s1.gps_mat, s1.or_mat,
@@ -411,7 +395,6 @@ void didhetero_run_from_ado()
 
     // =========================================================================
     // Step 5: Stage 2/3 — DR estimation + SE + analytical UCB + bootstrap UCB
-    // Paper ref: Section 4.2 (DR estimation, SE, UCB)
     // =========================================================================
     printf("{txt}Stage 2/3: DR estimation")
     if (bstrap) {
@@ -449,9 +432,8 @@ void didhetero_run_from_ado()
 //   est    - num_zeval x num_gteval point estimates
 //   bw_vec - num_gteval x 1 bandwidths
 //   bstrap - 1 if bootstrap was performed
-//
-// Paper ref: Section 4.2 (results assembly)
 // -----------------------------------------------------------------------------
+
 void didhetero_post_results(
     struct DidHeteroData scalar data,
     real matrix est,
@@ -467,7 +449,6 @@ void didhetero_post_results(
 
     // === Build results matrix ===
     // Columns: g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw
-    // Rows: K * R (one row per (g,t,z) combination)
     results = J(K * R, 10, .)
 
     row = 0
@@ -499,14 +480,13 @@ void didhetero_post_results(
         (J(10, 1, ""), ("g" \ "t" \ "z" \ "est" \ "se" \
          "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
 
-    // Keep a Stata-side alias `e(Estimate)` for backward compatibility.
+    // Alias e(Estimate) maintained for backward compatibility
     st_matrix("e(Estimate)", results)
     st_matrixcolstripe("e(Estimate)",
         (J(10, 1, ""), ("g" \ "t" \ "z" \ "est" \ "se" \
          "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
 
     // Point estimates (vectorized: all z for gt1, then all z for gt2, ...)
-    // Note: e(b) is reserved by Stata (requires ereturn post); use e(Estimate_b)
     st_matrix("e(Estimate_b)", vec(est)')
 
     // gteval matrix
@@ -529,8 +509,7 @@ void didhetero_post_results(
 
     // === Store matrices needed by aggte_gt ===
 
-    // B_g_t: flatten pointer array to n x (R * K) matrix
-    // Each B_g_t[k] is n x R, concatenate horizontally
+    // Flatten B_g_t pointer array into n x (R * K) matrix
     {
         real matrix B_g_t_flat
         real scalar k2
@@ -549,9 +528,7 @@ void didhetero_post_results(
     // Z: n x 1 covariate vector (store as row for Stata compatibility)
     st_matrix("e(Z)", data.Z')
 
-    // Persist the minimum Stage-0 / Stage-1 inputs needed by aggte_gt Pass 2.
-    // These matrices make the post-estimation object self-contained even after
-    // `mata clear` removes external globals from the current session.
+    // Store Stage-0 and Stage-1 inputs for post-estimation aggregation
     st_matrix("e(dh_Y_wide)", data.Y_wide)
     st_matrix("e(dh_G_unit)", data.G')
     st_matrix("e(dh_t_vals)", data.t_vals')
@@ -566,7 +543,7 @@ void didhetero_post_results(
     // mu_G_g: R x K conditional group density
     st_matrix("e(mu_G_g)", data.mu_G_g)
 
-    // catt_est: R x K point estimates (same as est parameter)
+    // catt_est: R x K point estimates
     st_matrix("e(catt_est)", est)
 
     // catt_se: R x K standard errors
@@ -575,7 +552,7 @@ void didhetero_post_results(
     // kd0_Z: R x 1 density estimates
     st_matrix("e(kd0_Z)", data.kd0_Z')
 
-    // kd1_Z: R x 1 density derivative estimates (from external)
+    // kd1_Z: R x 1 density derivative estimates
     {
         external real colvector _dh_kd1_Z
         st_matrix("e(kd1_Z)", _dh_kd1_Z')
@@ -584,9 +561,7 @@ void didhetero_post_results(
     // Z_supp: support points
     st_matrix("e(Z_supp)", data.Z_supp')
 
-    // gbar: comparison-set upper bound on treatment timing.
-    // Public contract: when never-treated units are present, Stata stores
-    // missing (.) as the numeric sentinel for +Inf and exposes e(gbar_isinf)=1.
+    // gbar: upper bound on treatment timing; missing if never-treated units exist
     st_numscalar("e(gbar)", data.gbar)
     st_numscalar("e(gbar_isinf)", missing(data.gbar))
 

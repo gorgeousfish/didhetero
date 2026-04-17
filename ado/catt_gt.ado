@@ -1,11 +1,8 @@
 *! catt_gt.ado
-*! Version 0.1.0
 *! Conditional Average Treatment Effect on the Treated (CATT)
 *! with continuous heterogeneity
 *!
 *! Core estimation command for group-time CATT(g,t,z) functions.
-*! Implements the three-step estimation procedure described in
-*! Section 4 of Imai, Qin, and Yanagi (2025).
 *!
 *! Syntax:
 *!   catt_gt depvar, id() time() group() z() zeval() [options]
@@ -13,9 +10,7 @@
 program define catt_gt, eclass
     version 16.0
 
-    // =========================================================================
-    // Step 1: Parse syntax and call validation
-    // =========================================================================
+    // Parse syntax and validate options
     local _dh_raw_bstrap_found 0
     local _dh_raw_bstrap_value ""
     local _dh_raw_uniformall_found 0
@@ -112,8 +107,7 @@ program define catt_gt, eclass
     if "`control_group'" == "" local control_group "notyettreated"
     if "`bwselect'" == "" local bwselect "IMSE1"
 
-    // Bootstrap default: ON (paper default)
-    // [noBSTrap] syntax: "nobstrap" → OFF, "bstrap" or "" → ON
+    // Bootstrap default: ON
     if `_dh_raw_bstrap_found' & "`bstrap'" != "" {
         di as error "bstrap() cannot be combined with legacy bootstrap flags"
         exit 198
@@ -133,8 +127,7 @@ program define catt_gt, eclass
         local bstrap "bstrap"
     }
 
-    // Uniformall default: ON (paper default for joint uniform inference)
-    // [noUNIFormall] syntax accepts legacy flag aliases uniformall/nouniformall.
+    // Uniformall default: ON
     if `_dh_raw_uniformall_found' & "`uniformall'" != "" {
         di as error "uniformall() cannot be combined with legacy uniform flags"
         exit 198
@@ -154,9 +147,7 @@ program define catt_gt, eclass
         local uniformall "uniformall"
     }
 
-    // catt_gt.sthlp documents seed(-1) as the only sentinel meaning "use the
-    // current RNG state". Reject all other negative integers at the API
-    // boundary so invalid seeds cannot silently slip through as metadata.
+    // Validate seed: -1 preserves current RNG state; non-negative integers set seed
     if (`seed' < -1) {
         di as error "catt_gt: seed() must be -1 or a nonnegative integer"
         di as error "  seed(-1) leaves the current RNG state unchanged"
@@ -164,10 +155,7 @@ program define catt_gt, eclass
         exit 198
     }
 
-    // When gteval() is omitted, catt_gt auto-builds the full (g,t) evaluation
-    // set internally, so only a scalar manual bandwidth is a well-defined API
-    // contract. Once users supply explicit gteval(), vector bw() is allowed
-    // and validated against the number of (g,t) rows below.
+    // Scalar bw() required when gteval() is omitted and bwselect = manual
     if "`bwselect'" == "manual" & "`bw'" != "" & "`gteval'" == "" {
         local n_bw_tokens : word count `bw'
         if `n_bw_tokens' != 1 {
@@ -176,15 +164,7 @@ program define catt_gt, eclass
         }
     }
 
-    // =========================================================================
-    // Step 2: Protect user data and honor if/in
-    // =========================================================================
-    // Protect user dataset from any modifications made during validation
-    // and estimation (dropping, recasting, sorting).
-    preserve
-    // If the user specified [if] and/or [in], restrict the working sample
-    // before validation so all checks and drops are scoped to the intended
-    // subset. This mirrors the behavior of didhetero.ado.
+    // Protect user data and apply [if] [in] restrictions
     if "`if'`in'" != "" {
         quietly keep `if' `in'
     }
@@ -193,14 +173,11 @@ program define catt_gt, eclass
     local _dh_rc = _rc
     if `_dh_rc' {
         restore
+        capture _est unhold `_dh_prev_est'
         exit `_dh_rc'
     }
 
-    // =========================================================================
-    // Step 3: Call validation subroutine on the (possibly restricted) sample
-    // =========================================================================
-    // Validation must operate on the already restricted working sample.
-    // Reapplying the original [if] [in] here would double-filter [in].
+    // Validate data and parameters
     _didhetero_validate `depvar',            ///
         id(`id')                              ///
         time(`time')                          ///
@@ -221,7 +198,7 @@ program define catt_gt, eclass
         bwselect(`bwselect')                  ///
         bw(`bw')
 
-    // Retrieve validated parameters from _didhetero_validate
+    // Retrieve validated parameters
     local depvar    `_dh_depvar'
     local id        `_dh_id'
     local time      `_dh_time'
@@ -244,7 +221,7 @@ program define catt_gt, eclass
     local bw        `_dh_bw'
     local n_total   `_dh_n'
 
-    // Override biters to 0 when bootstrap is off (matching didhetero.ado)
+    // Set biters to 0 when bootstrap is disabled
     if `bstrap' == 0 {
         local biters = 0
     }
@@ -262,18 +239,9 @@ program define catt_gt, eclass
     }
     di as text ""
 
-    // =========================================================================
-    // Step 4: Call Mata data preparation and initialize kernel constants
-    // =========================================================================
-    // Hold the caller's last estimates so any failure after ereturn clear can
-    // restore the exact pre-call state without leaving stale partial results.
-    tempname _dh_prev_est
-    capture _est hold `_dh_prev_est', restore nullok
+    // Prepare Mata data structures and initialize kernel constants
 
     ereturn clear
-    // Note: didhetero_init_from_ado() is a compiled Mata function that handles
-    // external struct declarations (not supported in inline mata blocks).
-    // It reads Stata locals and creates external globals _dh_data and _dh_kc.
     capture noisily mata: didhetero_init_from_ado()
     local _dh_rc = _rc
     if `_dh_rc' {
@@ -282,9 +250,7 @@ program define catt_gt, eclass
         exit `_dh_rc'
     }
 
-    // =========================================================================
-    // Step 5: Handle user-specified gteval
-    // =========================================================================
+    // Process user-specified gteval pairs
     if "`gteval'" != "" {
         local ngt_tokens : word count `gteval'
         if mod(`ngt_tokens', 2) != 0 {
@@ -337,12 +303,7 @@ program define catt_gt, eclass
         }
     }
 
-    // =========================================================================
-    // Step 6: Run full estimation pipeline
-    // =========================================================================
-    // didhetero_run_from_ado() reads the following locals:
-    //   pretrend, uniform, bstrap, bwselect, bw
-    // These are already set from the validated parameters above.
+    // Execute estimation pipeline
     capture noisily mata: didhetero_run_from_ado()
     local _dh_rc = _rc
     if `_dh_rc' {
@@ -351,14 +312,12 @@ program define catt_gt, eclass
         exit `_dh_rc'
     }
 
-    // Bootstrap-off runs do not post e(c_check). Drop any stale inherited
-    // matrix before _didhetero_post_eclass snapshots the successful result.
+    // Clean up stale bootstrap matrices when bootstrap is disabled
     if `bstrap' == 0 {
         capture matrix drop e(c_check)
     }
 
-    // Restore the original user dataset. e() results produced by Mata and
-    // the locals we set below are unaffected by restore.
+    // Restore original data and post results
     restore
     capture noisily _didhetero_post_eclass
     local _dh_rc = _rc
@@ -396,9 +355,7 @@ program define catt_gt, eclass
     ereturn scalar uniformall = `uniform'
     ereturn scalar pretrend  = `pretrend'
 
-    // =========================================================================
-    // Step 7: Display results table
-    // =========================================================================
+    // Display results table
     _didhetero_display
 
 end

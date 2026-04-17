@@ -1,29 +1,28 @@
 mata:
 
 // =============================================================================
-// didhetero_or.mata
-// OR (Outcome Regression) estimation via OLS
+// Outcome Regression (OR) Estimation
+//
+// This module implements outcome regression estimation for heterogeneous
+// treatment effects in difference-in-differences designs.
 //
 // Functions:
-//   1. didhetero_period_col()    - Find column index of period in Y_wide
-//   2. didhetero_or_ols()        - OLS core: estimate on subset, predict full
-//   3. didhetero_or_estimate()   - OR dispatch (nevertreated/notyettreated)
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//   Section 4.2.1 (OR estimation via OLS)
+//   didhetero_period_col()  - Locate period index in time vector
+//   didhetero_or_ols()      - OLS estimation with full-sample prediction
+//   didhetero_or_estimate() - Main estimation routine
 // =============================================================================
 
 // -----------------------------------------------------------------------------
 // didhetero_period_col()
-// Find 1-based column index of period t in t_vals vector.
 //
-// Args:
-//   t      - target period value
-//   t_vals - T x 1 sorted vector of unique period values
+// Locate the column index corresponding to a specific time period.
+//
+// Parameters:
+//   t      - scalar, target period value
+//   t_vals - colvector, sorted unique period values
 //
 // Returns:
-//   1-based column index
+//   scalar, 1-based column index in the wide-format outcome matrix
 // -----------------------------------------------------------------------------
 real scalar didhetero_period_col(real scalar t, real colvector t_vals)
 {
@@ -38,19 +37,18 @@ real scalar didhetero_period_col(real scalar t, real colvector t_vals)
 
 // -----------------------------------------------------------------------------
 // didhetero_or_ols()
-// OLS estimation on subset, prediction on full sample.
-// beta_hat is populated as output (Mata passes by reference).
 //
-// Args:
-//   y_sub    - n_sub x 1 dependent variable (estimation subset)
-//   X_sub    - n_sub x k covariate matrix (estimation subset, with intercept)
-//   X_full   - n x k covariate matrix (full sample, for prediction)
-//   beta_hat - k x 1 coefficient vector (OUTPUT)
+// Estimate OLS coefficients on a control group subset and compute
+// predicted values for the full sample.
+//
+// Parameters:
+//   y_sub    - colvector, dependent variable for estimation subset
+//   X_sub    - matrix, covariates for estimation subset (includes intercept)
+//   X_full   - matrix, covariates for full sample
+//   beta_hat - colvector, estimated coefficients (output)
 //
 // Returns:
-//   n x 1 vector of predicted values (m_hat = X_full * beta_hat)
-//
-// Paper ref: Section 4.2.1, outcome regression via OLS
+//   colvector, predicted values for the full sample
 // -----------------------------------------------------------------------------
 real colvector didhetero_or_ols(real colvector y_sub, real matrix X_sub,
                                 real matrix X_full, real colvector beta_hat)
@@ -58,7 +56,7 @@ real colvector didhetero_or_ols(real colvector y_sub, real matrix X_sub,
     real matrix XtX
     real colvector Xty
     
-    // OLS normal equations: beta = (X'X)^{-1} X'y
+    // Solve OLS normal equations: beta = (X'X)^{-1} X'y
     XtX = cross(X_sub, X_sub)
     Xty = cross(X_sub, y_sub)
     beta_hat = lusolve(XtX, Xty)
@@ -68,26 +66,25 @@ real colvector didhetero_or_ols(real colvector y_sub, real matrix X_sub,
         _error("OR OLS: singular design matrix (X'X)")
     }
     
-    // Full sample prediction
+    // Compute predictions for full sample
     return(X_full * beta_hat)
 }
 
 // -----------------------------------------------------------------------------
 // didhetero_or_estimate()
-// OR estimation dispatch for all (g,t) pairs.
-// Always loops over (g,t) pairs regardless of control_group.
 //
-// Args:
-//   data          - DidHeteroData struct
-//   gteval        - K x 2 matrix of valid (g,t) pairs
-//   control_group - "nevertreated" or "notyettreated"
-//   anticipation  - anticipation periods (integer >= 0)
-//   or_coef       - (OUTPUT) K x (2+k) matrix of OLS coefficients
+// Compute outcome regression estimates for all (group, time) pairs.
+// Supports both never-treated and not-yet-treated control groups.
+//
+// Parameters:
+//   data          - struct DidHeteroData, estimation data
+//   gteval        - matrix, K x 2 matrix of (group, time) pairs
+//   control_group - string, control group type ("nevertreated" or "notyettreated")
+//   anticipation  - scalar, number of anticipation periods
+//   or_coef       - matrix, OLS coefficients by (group, time) (output)
 //
 // Returns:
-//   OR result matrix (id, g, t, est), always 4 columns, long format
-//
-// Paper ref: Section 4.2.1, OR estimation dispatch
+//   matrix, estimation results in long format (id, group, time, estimate)
 // -----------------------------------------------------------------------------
 real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
                                    real matrix gteval,
@@ -110,18 +107,16 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
     or_mat  = J(0, 4, .)
     or_coef = J(0, 2 + k, .)
     
-    // =====================================================================
-    // nevertreated: subset defined OUTSIDE loop
-    // =====================================================================
+    // Never-treated: control group subset is constant across all (g,t) pairs
     if (control_group == "nevertreated") {
-        // Subset: only never-treated units (G == 0)
+        // Identify never-treated units (G == 0)
         idx_sub_nev = didhetero_selectindex(G :== 0)
         
         if (cols(idx_sub_nev) == 0) {
             _error("OR estimate: no never-treated units (G==0)")
         }
         
-        // Extract subset covariates once (fixed across all (g,t))
+        // Extract covariates for control group (constant across pairs)
         X_sub = data.X[idx_sub_nev', .]
         
         // Loop over all (g,t) pairs
@@ -129,7 +124,7 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
             g1 = gteval[j, 1]
             t1 = gteval[j, 2]
             
-            // Dependent variable: Y_t - Y_{g-delta-1}
+            // Construct dependent variable: Y_t - Y_{g-anticipation-1}
             col_t    = didhetero_period_col(t1, data.t_vals)
             base_label = didhetero_period_at(
                 didhetero_period_ord(g1, data.t_vals) - anticipation - 1,
@@ -138,23 +133,21 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
             col_base = didhetero_period_col(base_label, data.t_vals)
             y_diff   = data.Y_wide[., col_t] - data.Y_wide[., col_base]
             
-            // Subset dependent variable
+            // Extract dependent variable for control group
             y_sub = y_diff[idx_sub_nev']
             
-            // OLS: estimate on subset, predict on full sample
+            // Estimate on control group, predict for full sample
             beta_hat = J(k, 1, .)
             m_hat = didhetero_or_ols(y_sub, X_sub, data.X, beta_hat)
             
-            // Collect OLS coefficients
+            // Store coefficient estimates
             or_coef = or_coef \ (g1, t1, beta_hat')
             
-            // Append (id, g, t, est) block
+            // Append results to output matrix
             or_mat = or_mat \ (id, J(n, 1, g1), J(n, 1, t1), m_hat)
         }
     }
-    // =====================================================================
-    // notyettreated: subset defined INSIDE loop
-    // =====================================================================
+    // Not-yet-treated: control group subset varies by (g,t) pair
     else if (control_group == "notyettreated") {
         G_ord = J(n, 1, 0)
         for (i = 1; i <= n; i++) {
@@ -170,11 +163,10 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
             g1 = gteval[j, 1]
             t1 = gteval[j, 2]
             
-            // Appendix D uses D_{t+delta} = 0, which depends on the ordinal
-            // position of t within the observed time support.
+            // Compute threshold for not-yet-treated condition
             threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
             
-            // Subset: never-treated OR not-yet-treated
+            // Identify control units: never-treated or not-yet-treated
             subset_mask = (G :== 0) :| (G_ord :> threshold_ord)
             idx_sub = didhetero_selectindex(subset_mask)
             
@@ -182,7 +174,7 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
                 _error("OR estimate: empty subset for (g,t)=(" + strofreal(g1) + "," + strofreal(t1) + ")")
             }
             
-            // Dependent variable: Y_t - Y_{g-delta-1}
+            // Construct dependent variable: Y_t - Y_{g-anticipation-1}
             col_t    = didhetero_period_col(t1, data.t_vals)
             base_label = didhetero_period_at(
                 didhetero_period_ord(g1, data.t_vals) - anticipation - 1,
@@ -191,18 +183,18 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
             col_base = didhetero_period_col(base_label, data.t_vals)
             y_diff   = data.Y_wide[., col_t] - data.Y_wide[., col_base]
             
-            // Subset
+            // Extract data for control group
             y_sub = y_diff[idx_sub']
             X_sub = data.X[idx_sub', .]
             
-            // OLS: estimate on subset, predict on full sample
+            // Estimate on control group, predict for full sample
             beta_hat = J(k, 1, .)
             m_hat = didhetero_or_ols(y_sub, X_sub, data.X, beta_hat)
             
-            // Collect OLS coefficients
+            // Store coefficient estimates
             or_coef = or_coef \ (g1, t1, beta_hat')
             
-            // Append (id, g, t, est) block
+            // Append results to output matrix
             or_mat = or_mat \ (id, J(n, 1, g1), J(n, 1, t1), m_hat)
         }
     }

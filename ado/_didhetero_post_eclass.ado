@@ -1,5 +1,4 @@
-*! _didhetero_post_eclass.ado
-*! Internal helper: turn didhetero/catt_gt output into a storable eclass object
+*! Store didhetero/catt_gt results in eclass matrices
 
 mata:
 void __dh_capture_post_state(real scalar has_c_check)
@@ -138,9 +137,7 @@ program define _didhetero_post_eclass, eclass
     tempname b
     matrix `b' = e(Estimate_b)
 
-    // The package's authoritative inference lives in e(results)/e(catt_se).
-    // Post only e(b) so estimates store/restore remains available without
-    // advertising an unsupported covariance matrix for generic Wald commands.
+    // Post e(b) for estimates store/restore; V is zero (inference via e(results))
     local stripe_names
     forvalues i = 1/`=colsof(`b')' {
         local b_i = el(`b', 1, `i')
@@ -152,9 +149,7 @@ program define _didhetero_post_eclass, eclass
 
     matrix colnames `b' = `stripe_names'
 
-    // Build a conformable zero V so that e(V) exists and estimates store works.
-    // The package's authoritative inference lives in e(results)/e(catt_se);
-    // the zero V signals that generic Wald tests on e(b) are not supported.
+    // Zero V signals that Wald tests on e(b) are not supported
     tempname V
     local _k = colsof(`b')
     matrix `V' = J(`_k', `_k', 0)

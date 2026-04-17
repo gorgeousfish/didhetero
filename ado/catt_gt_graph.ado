@@ -1,30 +1,26 @@
-*! catt_gt_graph.ado
-*! Version 0.1.0
-*! Visualize CATT or aggregated parameter estimates
-*! Post-estimation command for didhetero / catt_gt / aggte_gt
-*!
-*! Implements Imai, Qin, and Yanagi (2025).
-*!
-*! Syntax:
-*!   catt_gt_graph, [plot_type(string) save_path(string) graph_opt(string)]
-*!
-*! Options:
-*!   plot_type  - "CATT" or "Aggregated" (auto-detected if omitted)
-*!   save_path  - file path to save the last graph (.png/.pdf via export, .gph via save)
-*!   graph_opt  - additional Stata graph options passed to twoway
-*!
-*! e() matrix sources:
-*!   catt_gt  stores the 10-column CATT matrix in both e(results) and e(Estimate)
-*!            columns: g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw
-*!   aggte_gt stores 9-column matrix as e(Estimate)
-*!            columns: eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw
+*  Post-estimation visualization for CATT and aggregated treatment effect estimates.
+*
+*  Syntax
+*  -----
+*      catt_gt_graph [, plot_type(string) save_path(string) graph_opt(string)]
+*
+*  Options
+*  -------
+*      plot_type(string)   - "CATT" or "Aggregated" (auto-detected if omitted)
+*      save_path(string)   - file path to save the last graph (.png/.pdf via export, .gph via save)
+*      graph_opt(string)   - additional Stata graph options passed to twoway
+*
+*  e() Matrix Structure
+*  --------------------
+*      catt_gt stores the 10-column CATT matrix in e(results) or e(Estimate):
+*          (g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)
+*      aggte_gt stores the 9-column aggregated matrix in e(Estimate):
+*          (eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)
 
 program define catt_gt_graph
     version 16.0
 
-    // =========================================================================
-    // Step 1: Parse syntax
-    // =========================================================================
+    /*  Parse syntax  */
     syntax, [plot_type(string) save_path(string) graph_opt(string)]
 
     if `"`plot_type'"' != "" {
@@ -35,11 +31,11 @@ program define catt_gt_graph
         }
     }
 
-    // =========================================================================
-    // Step 2: Locate e() results matrix
-    // =========================================================================
-    // Auto mode preserves the historical precedence (prefer e(Estimate)).
-    // Explicit plot_type() requests instead select the matching result object.
+    /*  Locate e() results matrix
+     *  --------------------------
+     *  Auto-detection prefers e(Estimate) when available. Explicit plot_type()
+     *  selects the matching matrix based on column structure.
+     */
 
     tempname _Est
     local _source_matrix ""
@@ -121,11 +117,7 @@ program define catt_gt_graph
 
         local ncols = colsof(`_Est')
 
-        // =========================================================================
-        // Step 3: Determine column count for mode detection
-        // =========================================================================
-        //   10 columns => CATT     (from catt_gt / e(results))
-        //    9 columns => Aggregated (from aggte_gt / e(Estimate))
+        /*  Column count determines plot mode: 10 columns for CATT, 9 for aggregated */
         if `ncols' == 10 {
             local mode "CATT"
         }
@@ -143,12 +135,12 @@ program define catt_gt_graph
     di as text "catt_gt_graph: mode = `mode' (source = e(`_source_matrix'), columns = `ncols')"
     di as text ""
 
-    // =========================================================================
-    // Step 6: Confidence band selection (panel-aware)
-    // =========================================================================
-    // Determine CI column indices once, then decide the band source panel by
-    // panel. A global "any ci2 exists" rule is incorrect for aggregated
-    // outputs because some eval-specific panels may still only have ci1.
+    /*  Confidence band selection (panel-specific)
+     *  ---------------------------------------------
+     *  Band source is determined panel-by-panel. For aggregated outputs, some
+     *  eval-specific panels may have only analytical confidence intervals.
+     */
+
     local nrows = rowsof(`_Est')
     if "`mode'" == "CATT" {
         local z_col = 3
@@ -167,7 +159,7 @@ program define catt_gt_graph
         local ci2_upper_col = 8
     }
 
-    // Count non-missing bootstrap rows globally for summary display only.
+    /*  Count non-missing bootstrap rows globally for summary display */
     local ci2_nonmiss = 0
     forvalues i = 1/`nrows' {
         if `_Est'[`i', `ci2_lower_col'] < . & `_Est'[`i', `ci2_upper_col'] < . {
@@ -185,9 +177,7 @@ program define catt_gt_graph
         di as text "  Confidence bands: panel-specific auto (prefer ci2; fallback to ci1)"
     }
 
-    // =========================================================================
-    // Step 7: Pre-trends zero reference line
-    // =========================================================================
+    /*  Pre-trends zero reference line */
     local pretrend_opt ""
     capture scalar _pt = e(pretrend)
     if !_rc {
@@ -196,13 +186,9 @@ program define catt_gt_graph
         }
     }
 
-    // =========================================================================
-    // Step 8: Plotting loop
-    // =========================================================================
+    /*  Plotting loop */
     if "`mode'" == "CATT" {
-        // -----------------------------------------------------------------
-        // CATT mode: one plot per (g, t) pair from e(gteval)
-        // -----------------------------------------------------------------
+        /*  CATT mode: one plot per (g, t) pair from e(gteval) */
         tempname _gteval _subset _row
         capture confirm matrix e(gteval)
         if _rc {
@@ -217,7 +203,7 @@ program define catt_gt_graph
             local g1 = `_gteval'[`k', 1]
             local t1 = `_gteval'[`k', 2]
 
-            // Count matching rows
+            /*  Count matching rows for this (g,t) pair */
             local match_count = 0
             forvalues i = 1/`nrows' {
                 if `_Est'[`i', 1] == `g1' & `_Est'[`i', 2] == `t1' {
@@ -230,7 +216,7 @@ program define catt_gt_graph
                 continue
             }
 
-            // Prefer bootstrap only when the current panel has complete ci2.
+            /*  Select bootstrap bands only when the panel has complete ci2 */
             local panel_ci2_nonmiss = 0
             forvalues i = 1/`nrows' {
                 if `_Est'[`i', 1] == `g1' & `_Est'[`i', 2] == `t1' {
@@ -251,7 +237,7 @@ program define catt_gt_graph
 
             di as text "  Group `g1'. Time `t1': confidence bands = `panel_ci_label'"
 
-            // Build subset matrix (match_count × 4): z, est, ci_lower, ci_upper
+            /*  Build subset matrix: z, est, ci_lower, ci_upper */
             matrix `_subset' = J(`match_count', 4, .)
             local r = 0
             forvalues i = 1/`nrows' {
@@ -264,7 +250,7 @@ program define catt_gt_graph
                 }
             }
 
-            // Convert to dataset and plot
+            /*  Convert to dataset and generate graph */
             preserve
             clear
             quietly svmat `_subset', names(col)
@@ -273,7 +259,7 @@ program define catt_gt_graph
             rename c3 ci_lower
             rename c4 ci_upper
 
-            // Build graph name with Stata-safe tokens for decimal and negative values
+            /*  Build graph name with safe tokens for decimal and negative values */
             local g1_clean : subinstr local g1 "." "_", all
             local g1_clean : subinstr local g1_clean "-" "m", all
             local t1_clean : subinstr local t1 "." "_", all
@@ -303,12 +289,10 @@ program define catt_gt_graph
         di as text "catt_gt_graph: `graph_count' CATT graph(s) generated."
     }
     else {
-        // -----------------------------------------------------------------
-        // Aggregated mode: one plot per eval point (or single for simple)
-        // -----------------------------------------------------------------
+        /*  Aggregated mode: one plot per evaluation point (or single for simple aggregation) */
         tempname _subset
 
-        // Get aggregation type
+        /*  Retrieve aggregation type from e(type) */
         local agg_type = e(type)
         local graph_count = 0
 
@@ -329,7 +313,7 @@ program define catt_gt_graph
             }
             di as text "  Simple weighted CATT: confidence bands = `panel_ci_label'"
 
-            // Simple: single plot using all rows
+            /*  Simple aggregation: single plot using all rows */
             local subset_rows = `nrows'
             matrix `_subset' = J(`subset_rows', 4, .)
             forvalues i = 1/`nrows' {
@@ -366,8 +350,7 @@ program define catt_gt_graph
             local graph_count = 1
         }
         else {
-            // dynamic/group/calendar: one plot per unique eval point
-            // Get unique eval values from column 1
+            /*  Dynamic, group, or calendar aggregation: one plot per unique evaluation point */
             local eval_list ""
             forvalues i = 1/`nrows' {
                 local val = `_Est'[`i', 1]
@@ -383,7 +366,7 @@ program define catt_gt_graph
             }
 
             foreach e1 of local eval_list {
-                // Count matching rows
+                /*  Count matching rows for this evaluation point */
                 local match_count = 0
                 forvalues i = 1/`nrows' {
                     if `_Est'[`i', 1] == `e1' {
@@ -415,7 +398,7 @@ program define catt_gt_graph
 
                 di as text "  Evaluation point `e1': confidence bands = `panel_ci_label'"
 
-                // Build subset matrix
+                /*  Build subset matrix: z, est, ci_lower, ci_upper */
                 matrix `_subset' = J(`match_count', 4, .)
                 local r = 0
                 forvalues i = 1/`nrows' {
@@ -436,7 +419,7 @@ program define catt_gt_graph
                 rename c3 ci_lower
                 rename c4 ci_upper
 
-                // Build graph name (handle decimals/negatives)
+                /*  Build graph name with safe tokens for decimal and negative values */
                 local e1_clean : subinstr local e1 "." "_", all
                 local e1_clean : subinstr local e1_clean "-" "m", all
                 local gname "eval`e1_clean'"
@@ -465,9 +448,7 @@ program define catt_gt_graph
         di as text "catt_gt_graph: `graph_count' Aggregated graph(s) generated (type = `agg_type')."
     }
 
-    // =========================================================================
-    // Step 9: Save graph if save_path() specified
-    // =========================================================================
+    /*  Save graph if save_path() specified */
     if `"`save_path'"' != "" {
         local save_path_lc = lower(`"`save_path'"')
         if regexm(`"`save_path_lc'"', "\.gph$") {

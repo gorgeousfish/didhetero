@@ -11,13 +11,6 @@ mata:
 // Supported kernels:
 //   "epa" - Epanechnikov: K(u) = 0.75 * (1 - u^2) * I(|u| <= 1)
 //   "gau" - Gaussian:     K(u) = phi(u) (standard normal density)
-//
-// References:
-//   Paper: Imai, Qin, Yanagi (2025)
-//     - Section 4.2.2 Eq. 18-19 (LQR bias/variance constants)
-//     - Section 4.2.6 / Appendix A (LLR bias/variance constants)
-//     - Eq. 21-22 (lambda, analytical UCB)
-//   Section 4.2.2 Eq. 18-19, Section 4.2.6, Appendix A
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -30,8 +23,6 @@ mata:
 //
 // Returns:
 //   real matrix of kernel values, same dimension as u
-//
-// Paper ref: Gaussian and Epanechnikov kernel functions
 // -----------------------------------------------------------------------------
 real matrix didhetero_kernel_eval(real matrix u, string scalar kernel)
 {
@@ -53,8 +44,8 @@ real matrix didhetero_kernel_eval(real matrix u, string scalar kernel)
 // didhetero_kernel_consts()
 // Initialize kernel integral constants struct.
 //
-// Computes base integral moments and derives LLR/LQR bias and variance
-// constants at runtime from those base integrals.
+// Computes base integral moments and derives local linear regression (LLR) and
+// local quadratic regression (LQR) bias and variance constants at runtime.
 //
 // Base integrals:
 //   I_{l,K^m} = int u^l [K(u)]^m du
@@ -74,9 +65,6 @@ real matrix didhetero_kernel_eval(real matrix u, string scalar kernel)
 //
 // Returns:
 //   DidHeteroKernelConsts struct with all fields populated
-//
-// Paper refs: Section 4.2.2 Eq. 18-19, Section 4.2.6, Appendix A
-// cf. Imai, Qin, and Yanagi (2025), Sections 4.2.2 and 4.2.6
 // -----------------------------------------------------------------------------
 struct DidHeteroKernelConsts scalar didhetero_kernel_consts(string scalar kernel)
 {
@@ -116,21 +104,20 @@ struct DidHeteroKernelConsts scalar didhetero_kernel_consts(string scalar kernel
         _error("invalid kernel: " + kernel)
     }
     
-    // --- Derived constants (computed from base integrals, not hardcoded) ---
+    // --- Derived constants (computed from base integrals) ---
     
-    // LLR constants (Paper Section 4.2.6 / Appendix A, p=1 special case)
-    kc.const_B1 = kc.I_2_K / 2                    // Bias: h^2 * (I_{2,K}/2) * mu_B''(z)
-    kc.const_V1 = kc.I_0_K2                        // Var: I_{0,K^2}/(nh) * sigma_B^2/f_Z
+    // LLR constants
+    kc.const_B1 = kc.I_2_K / 2                    // Bias constant
+    kc.const_V1 = kc.I_0_K2                        // Variance constant
     
-    // LQR constants (Paper Section 4.2.2, Eq. 18-19)
+    // LQR constants
     real scalar denom
     denom = kc.I_4_K - kc.I_2_K^2
     
-    // Eq. 18: const_B2 = (I_{4,K}^2 - I_{2,K}*I_{6,K}) / (I_{4,K} - I_{2,K}^2)
+    // LQR bias constant
     kc.const_B2 = (kc.I_4_K^2 - kc.I_2_K * kc.I_6_K) / denom
     
-    // Eq. 19: const_V2 = (I_{4,K}^2*I_{0,K^2} - 2*I_{2,K}*I_{4,K}*I_{2,K^2}
-    //                     + I_{2,K}^2*I_{4,K^2}) / (I_{4,K} - I_{2,K}^2)^2
+    // LQR variance constant
     kc.const_V2 = (kc.I_4_K^2 * kc.I_0_K2 ///
                    - 2 * kc.I_2_K * kc.I_4_K * kc.I_2_K2 ///
                    + kc.I_2_K^2 * kc.I_4_K2) / denom^2

@@ -1,14 +1,11 @@
 *! didhetero.ado
-*! Version 0.1.0
 *!
 *! Doubly Robust Uniform Confidence Bands for Group-Time Conditional
 *! Average Treatment Effects in Difference-in-Differences
 *!
-*! Main entry point for the didhetero-stata package.
-*! Implements Imai, Qin, and Yanagi (2025).
-*!
 *! Syntax:
-*!   didhetero depvar, id() time() group() z() zeval() [options]
+*!   didhetero depvar, id(varname) time(varname) group(varname) z(varname)
+*!         zeval(numlist) [options]
 *!
 *! Required options:
 *!   id(varname)        - panel unit identifier
@@ -18,53 +15,40 @@
 *!   zeval(numlist)     - evaluation points for z
 *!
 *! Optional:
-*!   xformula(string)   - first-stage covariate formula or legacy variable list
-*!   gteval(numlist)     - (g,t) evaluation pairs (g1 t1 g2 t2 ...)
+*!   xformula(string)   - first-stage covariate specification
+*!   gteval(numlist)    - (g,t) evaluation pairs (g1 t1 g2 t2 ...)
 *!   porder(integer 2)  - polynomial order (1 or 2)
 *!   kernel(string)     - kernel function: "gau" (default) or "epa"
 *!   control_group(string) - "notyettreated" (default) or "nevertreated"
 *!   anticipation(integer 0) - anticipation periods
 *!   alp(real 0.05)     - significance level
 *!   biters(integer 1000) - bootstrap iterations
-*!   bstrap(true|false)  - explicit bootstrap toggle
-*!   bstrap             - legacy bootstrap-on flag
-*!   uniformall(true|false) - explicit uniform inference toggle
-*!   nouniformall       - legacy alias for uniformall(false)
+*!   bstrap(true|false) - bootstrap toggle
+*!   uniformall(true|false) - uniform inference toggle
 *!   pretrend           - include pre-treatment periods
-*!   bwselect(string)   - bandwidth selection: "IMSE1" (default), "IMSE2", "US1", "manual"
+*!   bwselect(string)   - bandwidth selection: "IMSE1", "IMSE2", "US1", "manual"
 *!   bw(numlist)        - manual bandwidth(s)
-*!   noBOOTstrap        - suppress bootstrap; default is enabled
+*!   seed(integer -1)   - random number generator seed
 *!
 *! Returns (eclass):
-*!   e(results)    - matrix: g, t, z, est, se, ci1_lower, ci1_upper,
-*!                   ci2_lower, ci2_upper, bw
-*!   e(Estimate_b) - vectorized point estimates
-*!   e(gteval)     - (g,t) evaluation pairs
-*!   e(zeval)      - z evaluation points
-*!   e(bw)         - bandwidths per (g,t) pair
-*!   e(c_hat)      - analytical critical values
-*!   e(c_check)    - bootstrap critical values (if bstrap)
-*!   e(N)             - sample size (cross-sectional units)
+*!   e(results)       - estimation results matrix
+*!   e(Estimate_b)    - vectorized point estimates
+*!   e(gteval)        - (g,t) evaluation pairs
+*!   e(zeval)         - z evaluation points
+*!   e(bw)            - bandwidths per (g,t) pair
+*!   e(c_hat)         - analytical critical values
+*!   e(c_check)       - bootstrap critical values
+*!   e(N)             - number of cross-sectional units
 *!   e(T)             - number of time periods
 *!   e(num_gteval)    - number of (g,t) pairs
 *!   e(num_zeval)     - number of z evaluation points
-*!   e(anticipation)  - anticipation periods (primary name)
-*!   e(anticip)       - anticipation periods (legacy alias)
-*!   e(control_group) - control group specification (primary name)
-*!   e(control)       - control group specification (legacy alias)
-*!
-*! References:
-*!   Imai, S., Qin, L., & Yanagi, T. (2025).
-*!   Doubly robust uniform confidence bands for group-time conditional
-*!   average treatment effects in difference-in-differences.
-*!   Journal of Business & Economic Statistics, 1-13.
+*!   e(anticipation)  - anticipation periods
+*!   e(control_group) - control group specification
 
 program define didhetero, eclass
     version 16.0
 
-    // =========================================================================
-    // Step 1: Parse syntax
-    // =========================================================================
+    // Parse syntax
     local _dh_raw_bstrap_found 0
     local _dh_raw_bstrap_value ""
     local _dh_raw_uniformall_found 0
@@ -165,19 +149,14 @@ program define didhetero, eclass
 
     local depvar `varlist'
 
-    // =========================================================================
-    // Step 2: Resolve defaults and option conflicts
-    // =========================================================================
+    // Resolve option defaults and conflicts
 
-    // Reject contradictory bootstrap specifications at the API boundary.
+    // Validate bootstrap specifications.
     if `_dh_raw_bstrap_found' & ("`bstrap'" != "" | "`bootstrap'" != "") {
         di as err "bstrap() cannot be combined with legacy bootstrap flags"
         exit 198
     }
-    // `nobstrap` is a documented catt_gt legacy flag, but didhetero exposes
-    // `nobootstrap`/`bstrap(false)` instead. Reject the undocumented alias
-    // explicitly so Stata's option parser cannot silently reinterpret it as
-    // bootstrap-on.
+    // Reject legacy nobstrap flag.
     if "`bstrap'" == "nobstrap" {
         di as err "didhetero does not allow nobstrap; use nobootstrap or bstrap(false)"
         exit 198
@@ -187,19 +166,14 @@ program define didhetero, eclass
         exit 198
     }
 
-    // String defaults (Stata syntax does not support string defaults)
+    // Set string defaults.
     if "`kernel'" == "" local kernel "gau"
     if "`control_group'" == "" local control_group "notyettreated"
     if "`bwselect'" == "" local bwselect "IMSE1"
 
-    // Significance level: default is 0.05 when alp() is omitted; the
-    // downstream validator (_didhetero_validate.ado) rejects any value
-    // outside (0, 1). Earlier versions used -1 as a "use default" sentinel,
-    // which silently accepted alp(-1) from the user; that behaviour was
-    // inconsistent with catt_gt and has been removed.
+    // Significance level default is 0.05.
 
-    // Bootstrap: bstrap flag or nobootstrap flag
-    // Default: bootstrap ON (paper default)
+    // Bootstrap default is ON.
     if `_dh_raw_bstrap_found' {
         local bstrap_flag = (`"`_dh_raw_bstrap_value'"' == "true")
     }
@@ -210,13 +184,10 @@ program define didhetero, eclass
         local bstrap_flag = 1
     }
     else {
-        // Default: bootstrap ON
         local bstrap_flag = 1
     }
 
-    // didhetero.sthlp documents seed(-1) as the only sentinel meaning "use
-    // the current RNG state". Reject all other negative integers at the API
-    // boundary so invalid seeds cannot silently pass through the wrapper.
+    // Validate seed: -1 leaves RNG unchanged; other negative values rejected.
     if (`seed' < -1) {
         di as err "didhetero: seed() must be -1 or a nonnegative integer"
         di as err "  seed(-1) leaves the current RNG state unchanged"
@@ -224,8 +195,7 @@ program define didhetero, eclass
         exit 198
     }
 
-    // Uniformall default: ON (paper default for joint uniform inference)
-    // [noUNIFormall] syntax accepts legacy flag aliases uniformall/nouniformall.
+    // Uniform inference default is ON.
     if `_dh_raw_uniformall_found' & "`uniformall'" != "" {
         di as err "uniformall() cannot be combined with legacy uniform flags"
         exit 198
@@ -250,9 +220,7 @@ program define didhetero, eclass
     }
     local pretrend_flag = ("`pretrend'" != "")
 
-    // =========================================================================
-    // Step 3: Preserve data and apply if/in
-    // =========================================================================
+    // Preserve data and apply if/in
     preserve
 
     if "`if'`in'" != "" {
@@ -266,9 +234,7 @@ program define didhetero, eclass
         exit `_dh_rc'
     }
 
-    // =========================================================================
-    // Step 4: Call validation subroutine
-    // =========================================================================
+    // Validate input parameters
     local _dh_validate_bstrap
     if `bstrap_flag' == 1 {
         local _dh_validate_bstrap "bstrap"
@@ -294,7 +260,7 @@ program define didhetero, eclass
         bwselect(`bwselect')                       ///
         bw(`bw')
 
-    // Retrieve validated parameters
+    // Retrieve validated parameters.
     local depvar    `_dh_depvar'
     local id        `_dh_id'
     local time      `_dh_time'
@@ -317,18 +283,15 @@ program define didhetero, eclass
     local bw        `_dh_bw'
     local n_total   `_dh_n'
 
-    // Override biters to 0 when bootstrap is off
+    // Set biters to 0 when bootstrap is off.
     if `bstrap' == 0 {
         local biters = 0
     }
 
-    // =========================================================================
-    // Step 5: Display header
-    // =========================================================================
+    // Display estimation header
     di as text ""
     di as text "{hline 72}"
     di as text "Doubly Robust Uniform Confidence Bands for CATT"
-    di as text "Imai, Qin, and Yanagi (2025)"
     di as text "{hline 72}"
     di as text ""
     di as text "  Outcome variable:   `depvar'"
@@ -364,11 +327,8 @@ program define didhetero, eclass
     }
     di as text ""
 
-    // =========================================================================
-    // Step 6: Initialize Mata data structures
-    // =========================================================================
-    // Hold the caller's last estimates so any failure after ereturn clear can
-    // restore the exact pre-call state without leaving stale partial results.
+    // Initialize Mata data structures
+    // Preserve previous estimates for recovery on failure.
     tempname _dh_prev_est
     capture _est hold `_dh_prev_est', restore nullok
 
@@ -381,12 +341,9 @@ program define didhetero, eclass
         exit `_dh_rc'
     }
 
-    // =========================================================================
-    // Step 7: Handle user-specified gteval
-    // =========================================================================
+    // Handle user-specified (g,t) evaluation pairs
     if "`gteval'" != "" {
-        // Parse gteval numlist into pairs
-        // Format: g1 t1 g2 t2 ...
+        // Parse gteval numlist: format is (g1 t1 g2 t2 ...)
         local ngt_tokens : word count `gteval'
         if mod(`ngt_tokens', 2) != 0 {
             restore
@@ -397,8 +354,7 @@ program define didhetero, eclass
         local _ngt_pairs = `ngt_tokens' / 2
         local _gteval_user `gteval'
 
-        // When users provide explicit (g,t) pairs, bw() must be scalar
-        // or align with the number of gteval rows.
+        // Validate bandwidth specification for user-defined pairs.
         if "`bwselect'" == "manual" & "`bw'" != "" {
             local _n_bw_tokens : word count `bw'
             if (`_n_bw_tokens' != 1) & (`_n_bw_tokens' != `_ngt_pairs') {
@@ -440,9 +396,7 @@ program define didhetero, eclass
         }
     }
 
-    // =========================================================================
-    // Step 8: Run full estimation pipeline
-    // =========================================================================
+    // Run estimation
     capture noisily mata: didhetero_run_from_ado()
     local _dh_rc = _rc
     if `_dh_rc' {
@@ -452,15 +406,12 @@ program define didhetero, eclass
     }
     mata: st_local("_dh_effective_uniformall", strofreal(didhetero_get_uniformall(), "%9.0g"))
 
-    // Bootstrap-off runs do not post e(c_check). Drop any stale inherited
-    // matrix before _didhetero_post_eclass snapshots the successful result.
+    // Remove stale bootstrap results when bootstrap is off.
     if `bstrap' == 0 {
         capture matrix drop e(c_check)
     }
 
-    // =========================================================================
-    // Step 9: Restore data and post eclass results
-    // =========================================================================
+    // Post estimation results
     restore
     capture noisily _didhetero_post_eclass
     local _dh_rc = _rc
@@ -470,8 +421,7 @@ program define didhetero, eclass
     }
     capture _est unhold `_dh_prev_est', not
 
-    // Post eclass results (matrices already created by Mata)
-    // Add string scalars and macros
+    // Post eclass scalars and macros.
     ereturn local cmd        "didhetero"
     ereturn local depvar     "`depvar'"
     ereturn local idvar      "`id'"
@@ -497,9 +447,7 @@ program define didhetero, eclass
     ereturn scalar uniformall = `_dh_effective_uniformall'
     ereturn scalar pretrend  = `pretrend'
 
-    // =========================================================================
-    // Step 10: Display results table
-    // =========================================================================
+    // Display results table
     _didhetero_display
 
 end

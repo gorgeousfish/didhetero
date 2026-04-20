@@ -199,9 +199,20 @@ program define _didhetero_post_aggte_eclass, eclass
     mata: st_matrixcolstripe("e(results)", ///
         (J(10, 1, ""), ("g" \ "t" \ "z" \ "est" \ "se" \ ///
          "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
-    mata: st_matrixcolstripe("e(Estimate)", ///
-        (J(9, 1, ""), ("eval" \ "z" \ "est" \ "se" \ ///
-         "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
+    // Re-apply column stripe on e(Estimate). Column count is 9 for
+    // dynamic/group/calendar aggregations and 8 for simple (no eval
+    // dimension), following Imai, Qin, and Yanagi (2025, Section 5).
+    local _est_ncols = colsof(e(Estimate))
+    if `_est_ncols' == 8 {
+        mata: st_matrixcolstripe("e(Estimate)", ///
+            (J(8, 1, ""), ("z" \ "est" \ "se" \ ///
+             "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
+    }
+    else {
+        mata: st_matrixcolstripe("e(Estimate)", ///
+            (J(9, 1, ""), ("eval" \ "z" \ "est" \ "se" \ ///
+             "ci1_lower" \ "ci1_upper" \ "ci2_lower" \ "ci2_upper" \ "bw")))
+    }
     mata: st_matrixcolstripe("e(aggte_eval)", (J(1, 1, ""), "eval"))
     capture confirm matrix e(gteval)
     if !_rc {

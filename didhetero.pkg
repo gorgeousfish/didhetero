@@ -34,6 +34,7 @@ F ado/_didhetero_post_aggte_eclass.ado
 F ado/_didhetero_display.ado
 F ado/ldidhetero.mlib
 f data/simulated_data.dta
+f data/medicaid_county.dta
 f data/min_wage_cs.dta
 f data/seatbelt.dta
 f data/castle_doctrine.dta
@@ -43,6 +44,7 @@ f examples/example_aggte.do
 f examples/example_advanced.do
 f examples/example_pretrend.do
 f examples/example_visualization.do
+f examples/example_medicaid.do
 f examples/example_seatbelt.do
 f examples/example_castle.do
 f examples/example_divorce.do

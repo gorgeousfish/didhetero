@@ -2392,21 +2392,45 @@ void _didhetero_aggte_ado_entry(
         kd0_Z, kd1_Z, Z_supp, gbar, n,
         c_hat_catt, c_check_catt, pass2_data, gps_mat, or_mat)
 
-    // Build combined results matrix: (num_eval * num_zeval) x 9
-    Estimate = J(num_eval * num_zeval, 9, .)
-
-    for (id_eval = 1; id_eval <= num_eval; id_eval++) {
+    // Build combined results matrix.
+    //
+    // Schema follows Imai, Qin, and Yanagi (2025, Section 5):
+    //   - type "simple":   Theta^O(z) has no aggregation-dimension index,
+    //                      so Estimate is num_zeval x 8 with columns
+    //                      (z, est, se, ci1_lower, ci1_upper,
+    //                       ci2_lower, ci2_upper, bw).
+    //   - other types: Estimate is (num_eval * num_zeval) x 9 with
+    //                      leading column (eval) holding the
+    //                      aggregation index (event time, cohort, or
+    //                      calendar period).
+    if (type == "simple") {
+        Estimate = J(num_zeval, 8, .)
         for (r = 1; r <= num_zeval; r++) {
-            row_idx = (id_eval - 1) * num_zeval + r
-            Estimate[row_idx, 1] = R.eval_info[id_eval]
-            Estimate[row_idx, 2] = R.zeval[r]
-            Estimate[row_idx, 3] = R.aggte_est[id_eval, r]
-            Estimate[row_idx, 4] = R.aggte_se[id_eval, r]
-            Estimate[row_idx, 5] = R.ci1_lower[id_eval, r]
-            Estimate[row_idx, 6] = R.ci1_upper[id_eval, r]
-            Estimate[row_idx, 7] = R.ci2_lower[id_eval, r]
-            Estimate[row_idx, 8] = R.ci2_upper[id_eval, r]
-            Estimate[row_idx, 9] = R.aggte_bw[id_eval]
+            Estimate[r, 1] = R.zeval[r]
+            Estimate[r, 2] = R.aggte_est[1, r]
+            Estimate[r, 3] = R.aggte_se[1, r]
+            Estimate[r, 4] = R.ci1_lower[1, r]
+            Estimate[r, 5] = R.ci1_upper[1, r]
+            Estimate[r, 6] = R.ci2_lower[1, r]
+            Estimate[r, 7] = R.ci2_upper[1, r]
+            Estimate[r, 8] = R.aggte_bw[1]
+        }
+    }
+    else {
+        Estimate = J(num_eval * num_zeval, 9, .)
+        for (id_eval = 1; id_eval <= num_eval; id_eval++) {
+            for (r = 1; r <= num_zeval; r++) {
+                row_idx = (id_eval - 1) * num_zeval + r
+                Estimate[row_idx, 1] = R.eval_info[id_eval]
+                Estimate[row_idx, 2] = R.zeval[r]
+                Estimate[row_idx, 3] = R.aggte_est[id_eval, r]
+                Estimate[row_idx, 4] = R.aggte_se[id_eval, r]
+                Estimate[row_idx, 5] = R.ci1_lower[id_eval, r]
+                Estimate[row_idx, 6] = R.ci1_upper[id_eval, r]
+                Estimate[row_idx, 7] = R.ci2_lower[id_eval, r]
+                Estimate[row_idx, 8] = R.ci2_upper[id_eval, r]
+                Estimate[row_idx, 9] = R.aggte_bw[id_eval]
+            }
         }
     }
 
@@ -2442,13 +2466,14 @@ void _didhetero_aggte_display_table(
     real scalar uniformall)
 {
     real matrix Est
-    real scalar nrows, r
+    real scalar nrows, r, is_simple
     real scalar eval_val, z_val, est_val, se_val
     real scalar ci1l, ci1u, ci2l, ci2u, bw_val
     string scalar bstrap_str, uniform_str
 
     Est = st_matrix("__aggte_Estimate")
     nrows = rows(Est)
+    is_simple = (type == "simple")
 
     bstrap_str  = (bstrap)     ? sprintf("%g iterations", biters) : "disabled"
     uniform_str = (uniformall) ? "global" : "per-eval"
@@ -2466,18 +2491,31 @@ void _didhetero_aggte_display_table(
            bstrap_str, uniform_str)
     printf("{txt}{hline 78}\n")
 
-    // Column headers
-    printf("{txt}  %8s | %8s | %9s | %9s | %9s | %9s |",
-           "eval", "zeval", "est", "se", "ci1_lb", "ci1_ub")
+    // Column headers (simple has no eval column)
+    if (is_simple) {
+        printf("{txt}  %8s | %9s | %9s | %9s | %9s |",
+               "zeval", "est", "se", "ci1_lb", "ci1_ub")
+    }
+    else {
+        printf("{txt}  %8s | %8s | %9s | %9s | %9s | %9s |",
+               "eval", "zeval", "est", "se", "ci1_lb", "ci1_ub")
+    }
     if (bstrap) {
         printf(" %9s | %9s |", "ci2_lb", "ci2_ub")
     }
     printf(" %9s\n", "bw")
 
     // Separator
-    printf("{txt}  %s+%s+%s+%s+%s+%s+",
-           "{hline 9}", "{hline 9}", "{hline 10}", "{hline 10}",
-           "{hline 10}", "{hline 10}")
+    if (is_simple) {
+        printf("{txt}  %s+%s+%s+%s+%s+",
+               "{hline 9}", "{hline 10}", "{hline 10}",
+               "{hline 10}", "{hline 10}")
+    }
+    else {
+        printf("{txt}  %s+%s+%s+%s+%s+%s+",
+               "{hline 9}", "{hline 9}", "{hline 10}", "{hline 10}",
+               "{hline 10}", "{hline 10}")
+    }
     if (bstrap) {
         printf("%s+%s+", "{hline 10}", "{hline 10}")
     }
@@ -2485,18 +2523,33 @@ void _didhetero_aggte_display_table(
 
     // Data rows
     for (r = 1; r <= nrows; r++) {
-        eval_val = Est[r, 1]
-        z_val    = Est[r, 2]
-        est_val  = Est[r, 3]
-        se_val   = Est[r, 4]
-        ci1l     = Est[r, 5]
-        ci1u     = Est[r, 6]
-        ci2l     = Est[r, 7]
-        ci2u     = Est[r, 8]
-        bw_val   = Est[r, 9]
+        if (is_simple) {
+            z_val    = Est[r, 1]
+            est_val  = Est[r, 2]
+            se_val   = Est[r, 3]
+            ci1l     = Est[r, 4]
+            ci1u     = Est[r, 5]
+            ci2l     = Est[r, 6]
+            ci2u     = Est[r, 7]
+            bw_val   = Est[r, 8]
 
-        printf("{res}  %8.3f | %8.3f | %9.4f | %9.4f | %9.4f | %9.4f |",
-               eval_val, z_val, est_val, se_val, ci1l, ci1u)
+            printf("{res}  %8.3f | %9.4f | %9.4f | %9.4f | %9.4f |",
+                   z_val, est_val, se_val, ci1l, ci1u)
+        }
+        else {
+            eval_val = Est[r, 1]
+            z_val    = Est[r, 2]
+            est_val  = Est[r, 3]
+            se_val   = Est[r, 4]
+            ci1l     = Est[r, 5]
+            ci1u     = Est[r, 6]
+            ci2l     = Est[r, 7]
+            ci2u     = Est[r, 8]
+            bw_val   = Est[r, 9]
+
+            printf("{res}  %8.3f | %8.3f | %9.4f | %9.4f | %9.4f | %9.4f |",
+                   eval_val, z_val, est_val, se_val, ci1l, ci1u)
+        }
         if (bstrap) {
             printf(" %9.4f | %9.4f |", ci2l, ci2u)
         }
@@ -2505,10 +2558,16 @@ void _didhetero_aggte_display_table(
 
     // Footer
     printf("{txt}{hline 78}\n")
-    printf("{txt}  %g eval points x %g z-eval points = %g rows\n",
-           rows(st_matrix("__aggte_eval")),
-           rows(st_matrix("__aggte_zeval")),
-           nrows)
+    if (is_simple) {
+        printf("{txt}  %g z-eval points = %g rows (type=simple has no eval dimension)\n",
+               rows(st_matrix("__aggte_zeval")), nrows)
+    }
+    else {
+        printf("{txt}  %g eval points x %g z-eval points = %g rows\n",
+               rows(st_matrix("__aggte_eval")),
+               rows(st_matrix("__aggte_zeval")),
+               nrows)
+    }
     printf("{txt}{hline 78}\n")
 }
 

@@ -21,7 +21,7 @@ The estimator combines inverse probability weighting with outcome regression usi
 - **Flexible aggregation** into event-study (dynamic), group, calendar, and simple summary parameters
 - **Built-in visualization** for estimated CATT curves and aggregated parameters
 - **Pre-trends testing** for the conditional parallel trends assumption
-- **Bundled datasets** including the minimum wage application from the paper and three additional empirical applications (mandatory seat belt laws, no-fault divorce reform, castle doctrine)
+- **Bundled datasets** including the ACA Medicaid expansion analyzed as the running example in the companion Stata Journal article, the minimum wage panel of Callaway and Sant'Anna (2021) used as the running example in Imai, Qin, and Yanagi (2025), and three additional empirical applications (mandatory seat belt laws, no-fault divorce reform, castle doctrine)
 
 ## Key Concepts
 
@@ -92,7 +92,7 @@ net install didhetero, from("/path/to/didhetero-stata/") replace
 
 ### Download example scripts and bundled datasets
 
-Bundled datasets (`min_wage_cs.dta`, `seatbelt.dta`, `castle_doctrine.dta`, `divorce_sw.dta`, `simulated_data.dta`) and example do-files are distributed as ancillary files. Fetch them into your current working directory with:
+Bundled datasets (`medicaid_county.dta`, `min_wage_cs.dta`, `seatbelt.dta`, `castle_doctrine.dta`, `divorce_sw.dta`, `simulated_data.dta`) and example do-files are distributed as ancillary files. Fetch them into your current working directory with:
 
 ```stata
 net get didhetero
@@ -296,6 +296,26 @@ catt_gt_graph
 ```
 
 ## Datasets
+
+### ACA Medicaid Expansion (`medicaid_county.dta`)
+
+County-level balanced panel on working-age (20–64) crude mortality rates, 2009–2019 (11 periods, 2,697 U.S. counties; 29,667 observations). States expanded Medicaid eligibility under the ACA in a staggered manner from 2014 onward: 1,069 counties in 2014, 172 in 2015, 93 in 2016, 140 in 2019, and 1,223 never adopted through 2019. The **running example** in the companion Stata Journal article.
+
+**Data structure (`medicaid_county.dta`):**
+
+| Variable | Description |
+|----------|-------------|
+| `Y` | Working-age (20–64) crude mortality rate per 100,000 |
+| `G` | Year of Medicaid expansion (0 = never adopted through 2019) |
+| `period` | Calendar year (2009–2019) |
+| `id` | County FIPS identifier |
+| `Z` | 2011–2013 mean of `Y`: pre-expansion baseline mortality per 100,000 |
+| `Z_poverty` | 2013 county poverty rate (%), retained for robustness checks |
+| `state`, `stfips` | State name and FIPS code |
+
+**Research question**: Does the county-level mortality response to Medicaid expansion vary with pre-expansion baseline mortality?
+
+**Data preparation**: See the replication materials (`replication/code/00_prep_baseline_mortality.do`) for the construction of `Z` from the raw 2009–2019 county-level mortality series.
 
 ### Minimum Wage — Callaway and Sant'Anna (2021)
 
@@ -690,6 +710,39 @@ matrix list e(Estimate), format(%9.4f)
 catt_gt_graph, plot_type("Aggregated")
 ```
 
+### Example 10: Empirical Application — ACA Medicaid Expansion
+
+This example applies `didhetero` to the ACA Medicaid expansion panel used as the running example in the companion Stata Journal article. The research question is whether the county-level mortality response to Medicaid expansion varies with pre-expansion baseline mortality. Requires `medicaid_county.dta` (see [data preparation](#aca-medicaid-expansion-medicaid_countydta)).
+
+```stata
+clear all
+set more off
+
+use medicaid_county.dta, clear
+
+* Y: working-age mortality rate, Z: 2011-2013 baseline mortality
+summarize Y G period Z
+tab G if period == 2013
+
+* Evaluation points: 25th, 50th, 75th percentiles of Z rounded
+local zpts "340 425 525"
+
+catt_gt Y, group(G) time(period) id(id) z(Z) ///
+    zeval(`zpts') ///
+    gteval(2014 2014 2014 2015 2014 2016 2015 2015 2015 2016 2015 2017 2016 2016 2016 2017 2016 2018) ///
+    porder(2) kernel("gau") bwselect("IMSE1") ///
+    bstrap(false) uniformall(false) ///
+    control_group("notyettreated")
+
+matrix list e(results), format(%9.4f)
+catt_gt_graph
+
+* Event-study aggregation
+aggte_gt, type("dynamic") eval(0 1 2) bstrap(false) uniformall(false)
+matrix list e(Estimate), format(%9.4f)
+catt_gt_graph, plot_type("Aggregated")
+```
+
 ## Stored Results
 
 ### catt_gt / didhetero
@@ -765,7 +818,7 @@ catt_gt_graph, plot_type("Aggregated")
 
 | Result | Description |
 |--------|-------------|
-| `e(Estimate)` | Main results (eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw) |
+| `e(Estimate)` | Main results. 9 columns `(eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)` for `type(dynamic)`/`type(group)`/`type(calendar)`; 8 columns `(z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)` for `type(simple)` (no `eval` dimension) |
 | `e(aggte_est)` | Aggregated point estimates |
 | `e(aggte_se)` | Aggregated standard errors |
 | `e(aggte_bw)` | Bandwidths used |

@@ -73,8 +73,9 @@ disp as txt "CATT plot displayed: employment effect heterogeneity by poverty rat
 // Aggregated plots show treatment effects summarized across cohorts,
 // here as a dynamic (event-study) aggregation.
 //
-// aggte_gt produces a 9-column e(Estimate) matrix, which the graph
-// command auto-detects as Aggregated mode.
+// aggte_gt produces an e(Estimate) matrix whose column count depends
+// on the aggregation type (9 columns for dynamic/group/calendar, 8 for
+// simple); catt_gt_graph auto-detects the matching Aggregated mode.
 //   - Shaded area: confidence bands for the aggregated estimates
 //   - Black line:  aggregated CATT at each event time as a function of z
 

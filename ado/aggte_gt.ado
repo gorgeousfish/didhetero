@@ -478,7 +478,16 @@ program define aggte_gt, eclass
     matrix `_bwm'   = __aggte_bw
     matrix `_evalm' = __aggte_eval
     matrix `_zevalm' = __aggte_zeval
-    matrix colnames `_Est' = eval z est se ci1_lower ci1_upper ci2_lower ci2_upper bw
+    // Column schema depends on aggregation type (Imai, Qin, and Yanagi
+    // 2025, Section 5): simple has no aggregation index, so drop the
+    // eval column; other types carry the event/cohort/calendar index
+    // in column 1.
+    if "`type'" == "simple" {
+        matrix colnames `_Est' = z est se ci1_lower ci1_upper ci2_lower ci2_upper bw
+    }
+    else {
+        matrix colnames `_Est' = eval z est se ci1_lower ci1_upper ci2_lower ci2_upper bw
+    }
     matrix colnames `_evalm' = eval
 
     // Clean up global matrices

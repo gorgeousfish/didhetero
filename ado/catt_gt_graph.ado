@@ -14,8 +14,12 @@
 *  --------------------
 *      catt_gt stores the 10-column CATT matrix in e(results) or e(Estimate):
 *          (g, t, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)
-*      aggte_gt stores the 9-column aggregated matrix in e(Estimate):
+*      aggte_gt stores the aggregated matrix in e(Estimate) with a
+*      type-specific column schema (Imai, Qin, and Yanagi 2025, Section 5):
+*        - dynamic/group/calendar (9 columns):
 *          (eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)
+*        - simple (8 columns; no eval dimension):
+*          (z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw)
 
 program define catt_gt_graph
     version 16.0
@@ -93,13 +97,13 @@ program define catt_gt_graph
         }
 
         local ncols = colsof(`_Est')
-        if `ncols' != 9 & `has_results' & "`_source_matrix'" != "results" {
+        if !inlist(`ncols', 8, 9) & `has_results' & "`_source_matrix'" != "results" {
             matrix `_Est' = e(results)
             local _source_matrix "results"
             local ncols = colsof(`_Est')
         }
-        if `ncols' != 9 {
-            di as error "catt_gt_graph: plot_type(Aggregated) requires a 9-column aggregated matrix."
+        if !inlist(`ncols', 8, 9) {
+            di as error "catt_gt_graph: plot_type(Aggregated) requires an 8- or 9-column aggregated matrix."
             di as error "  e(Estimate) and e(results) do not currently store aggregated results."
             exit 198
         }
@@ -117,16 +121,20 @@ program define catt_gt_graph
 
         local ncols = colsof(`_Est')
 
-        /*  Column count determines plot mode: 10 columns for CATT, 9 for aggregated */
+        /*  Column count determines plot mode: 10 columns for CATT; 9 for
+         *  dynamic/group/calendar aggregation; 8 for simple aggregation
+         *  (no eval column).
+         */
         if `ncols' == 10 {
             local mode "CATT"
         }
-        else if `ncols' == 9 {
+        else if `ncols' == 9 | `ncols' == 8 {
             local mode "Aggregated"
         }
         else {
             di as error "catt_gt_graph: e(`_source_matrix') has `ncols' columns;"
-            di as error "  expected 10 (CATT) or 9 (Aggregated)."
+            di as error "  expected 10 (CATT), 9 (Aggregated: dynamic/group/calendar),"
+            di as error "  or 8 (Aggregated: simple)."
             exit 198
         }
     }
@@ -150,7 +158,17 @@ program define catt_gt_graph
         local ci2_lower_col = 8
         local ci2_upper_col = 9
     }
+    else if `ncols' == 8 {
+        /*  Aggregated simple: no eval column; all offsets shift left by one. */
+        local z_col = 1
+        local est_col = 2
+        local ci1_lower_col = 4
+        local ci1_upper_col = 5
+        local ci2_lower_col = 6
+        local ci2_upper_col = 7
+    }
     else {
+        /*  Aggregated dynamic/group/calendar: 9-column layout. */
         local z_col = 2
         local est_col = 3
         local ci1_lower_col = 5

@@ -176,8 +176,15 @@ not require re-estimating the CATT surface.
 
 {pstd}
 After {cmd:aggte_gt}, the aggregated results live in {cmd:e(Estimate)}
-(9 columns: {it:eval, z, est, se, ci1_lower, ci1_upper, ci2_lower,
-ci2_upper, bw}), while the upstream CATT matrix remains in
+with a type-specific column schema that follows the mathematical
+parameters of Imai, Qin, and Yanagi (2025, Section 5): 9 columns
+({it:eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw})
+for {cmd:type(dynamic)}, {cmd:type(group)}, and {cmd:type(calendar)},
+and 8 columns ({it:z, est, se, ci1_lower, ci1_upper, ci2_lower,
+ci2_upper, bw}) for {cmd:type(simple)} -- the aggregation index
+({it:eval}) is omitted because the simple overall parameter
+{it:theta-O(z)} has no event-time, cohort, or calendar dimension. The
+upstream CATT matrix remains in
 {cmd:e(results)} (10 columns). Both surfaces are accessible to
 {helpb catt_gt_graph}; pass {cmd:plot_type(Aggregated)} to plot the
 summary parameter or {cmd:plot_type(CATT)} to plot the underlying CATT
@@ -298,7 +305,7 @@ same information), the upstream {helpb catt_gt}/{helpb didhetero} snapshot
 {p2col 5 24 28 2: Matrices (aggregation output)}{p_end}
 {synopt:{cmd:e(b)}}storable aggregated point-estimate row used by {cmd:estimates store}{p_end}
 {synopt:{cmd:e(V)}}diagonal covariance matrix with {cmd:e(aggte_se)^2} entries; off-diagonals are zero{p_end}
-{synopt:{cmd:e(Estimate)}}main results matrix (9 columns): {it:eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw}{p_end}
+{synopt:{cmd:e(Estimate)}}main results matrix; 9 columns ({it:eval, z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw}) for {cmd:type(dynamic)}/{cmd:type(group)}/{cmd:type(calendar)}, 8 columns ({it:z, est, se, ci1_lower, ci1_upper, ci2_lower, ci2_upper, bw}) for {cmd:type(simple)}{p_end}
 {synopt:{cmd:e(Estimate_b)}}vectorized aggregated point estimates used by {cmd:e(b)}{p_end}
 {synopt:{cmd:e(aggte_est)}}aggregated point estimates{p_end}
 {synopt:{cmd:e(aggte_se)}}aggregated standard errors{p_end}

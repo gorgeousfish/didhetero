@@ -165,9 +165,15 @@ program define catt_gt, eclass
     }
 
     // Protect user data and apply [if] [in] restrictions
+    preserve
+
     if "`if'`in'" != "" {
         quietly keep `if' `in'
     }
+
+    // Preserve previous estimation results for recovery on failure
+    tempname _dh_prev_est
+    capture _est hold `_dh_prev_est', restore nullok
 
     capture noisily _dh_ensure_backend
     local _dh_rc = _rc

@@ -132,7 +132,9 @@ void didhetero_se_analytical_ucb(
 {
     real scalar R, r, mu_B_bw, sigma2_bw_scalar, sigma2, V_hat_r
     real scalar n_missing, est_scale
+    real scalar _abs_n
     real colvector B_r, mu_B_hat, U_hat, sigma2_bw_vec
+    real colvector _abs_est
 
     R = rows(zeval)
 
@@ -206,8 +208,25 @@ void didhetero_se_analytical_ucb(
         }
         else if (V_hat_r != . & V_hat_r >= 0) {
             se_gt[r] = sqrt(V_hat_r / (n * bw_gt))
-            // Scale-invariant guard against pathologically large SEs
-            est_scale = median(abs(est_gt)) + 1
+            // Scale-invariant guard against pathologically large SEs.
+            // median() is not available in base Mata; compute the
+            // median of |est_gt| (with missing handling) via sort.
+            _abs_est = select(abs(est_gt), abs(est_gt) :< .)
+            _abs_n   = rows(_abs_est)
+            if (_abs_n == 0) {
+                est_scale = 1
+            }
+            else {
+                _sort(_abs_est, 1)
+                if (mod(_abs_n, 2) == 1) {
+                    est_scale = _abs_est[(_abs_n + 1) / 2] + 1
+                }
+                else {
+                    est_scale =
+                        (_abs_est[_abs_n / 2]
+                         + _abs_est[_abs_n / 2 + 1]) / 2 + 1
+                }
+            }
             if (se_gt[r] > 1e3 * est_scale) {
                 se_gt[r] = .
             }

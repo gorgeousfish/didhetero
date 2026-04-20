@@ -50,12 +50,15 @@ continuous covariate {it:z}.
 {pstd}
 The plot mode is determined automatically from the column count of the
 preferred results matrix: 10 columns ({helpb catt_gt}/{helpb didhetero})
-triggers {cmd:CATT} mode, while 9 columns ({helpb aggte_gt}) triggers
-{cmd:Aggregated} mode. When {opt plot_type()} is supplied, it overrides
-auto-detection: {cmd:plot_type(CATT)} pulls the 10-column matrix from
-{cmd:e(results)} (useful after {cmd:aggte_gt}, which preserves the
-upstream CATT object), while {cmd:plot_type(Aggregated)} pulls the
-9-column matrix from {cmd:e(Estimate)}.
+triggers {cmd:CATT} mode, while 8 or 9 columns ({helpb aggte_gt})
+trigger {cmd:Aggregated} mode -- 9 columns for {cmd:type(dynamic)},
+{cmd:type(group)}, and {cmd:type(calendar)}, 8 columns for
+{cmd:type(simple)} (no {it:eval} column). When {opt plot_type()} is
+supplied, it overrides auto-detection: {cmd:plot_type(CATT)} pulls the
+10-column matrix from {cmd:e(results)} (useful after {cmd:aggte_gt},
+which preserves the upstream CATT object), while
+{cmd:plot_type(Aggregated)} pulls the 8- or 9-column matrix from
+{cmd:e(Estimate)}.
 
 {pstd}
 Confidence bands are selected panel by panel. Bootstrap uniform bands
@@ -73,9 +76,11 @@ plot.
 {opt plot_type(string)} overrides the auto-detected plot mode. Accepts
 {cmd:CATT} or {cmd:Aggregated}; quoted forms such as {cmd:plot_type("CATT")}
 are also accepted. {cmd:CATT} requires a 10-column matrix and reads from
-{cmd:e(results)}; {cmd:Aggregated} requires a 9-column matrix and reads
-from {cmd:e(Estimate)}. When omitted, the mode is inferred from the
-preferred results matrix dimensions.
+{cmd:e(results)}; {cmd:Aggregated} requires an 8- or 9-column matrix
+(9 for {cmd:type(dynamic)}/{cmd:type(group)}/{cmd:type(calendar)},
+8 for {cmd:type(simple)}) and reads from {cmd:e(Estimate)}. When
+omitted, the mode is inferred from the preferred results matrix
+dimensions.
 
 {phang}
 {opt save_path(string)} specifies a file path for the last generated

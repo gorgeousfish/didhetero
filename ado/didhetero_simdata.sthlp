@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.1.0}{...}
+{* *! version 1.0.0  20260701}{...}
 {viewerjumpto "Syntax" "didhetero_simdata##syntax"}{...}
 {viewerjumpto "Description" "didhetero_simdata##description"}{...}
 {viewerjumpto "Options" "didhetero_simdata##options"}{...}

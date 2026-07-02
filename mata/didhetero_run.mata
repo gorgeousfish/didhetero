@@ -2,12 +2,24 @@ mata:
 
 // =============================================================================
 // didhetero_run.mata
-// Full estimation pipeline orchestration for didhetero command
+// Full estimation pipeline orchestration for didhetero/catt_gt commands
 //
-// Functions:
-//   1. didhetero_bw_preloop()      - Bandwidth selection pre-loop
-//   2. didhetero_run_from_ado()    - Full pipeline called from didhetero.ado
-//   3. didhetero_post_results()    - Post results to Stata e() and r()
+// Provides:
+//   - didhetero_bw_preloop()     // Bandwidth selection pre-loop
+//   - didhetero_run_from_ado()   // Full pipeline called from .ado layer
+//   - didhetero_post_results()   // Post results to Stata e() and r()
+//
+// Requires:
+//   - didhetero_types.mata              (DidHeteroData, all structs)
+//   - didhetero_utils_init.mata         (didhetero_init_from_ado)
+//   - didhetero_stage1.mata             (didhetero_stage1_dispatch)
+//   - didhetero_stage23.mata            (didhetero_stage23)
+//   - didhetero_bwselect_lpdensity.mata (_didhetero_bwselect_all)
+//   - didhetero_intermediate.mata       (didhetero_intermediate_vars)
+//   - didhetero_bootstrap_unified.mata  (didhetero_bootstrap_ucb)
+//   - didhetero_catt_core.mata          (didhetero_catt_core)
+//
+// Paper reference: Section 4, full algorithm
 // =============================================================================
 
 
@@ -72,6 +84,8 @@ real colvector didhetero_bw_preloop(
         if (data.uniformall | rows(bw_manual) == 1) {
             bw_vec = J(K, 1, min(bw_vec))
         }
+        // Undersmoothing condition diagnostic (Assumption 4(iii))
+        _didhetero_bw_check_undersmooth(bw_vec, n, bwselect)
         return(bw_vec)
     }
 
@@ -81,6 +95,7 @@ real colvector didhetero_bw_preloop(
     if (rows(data.G_g) != n | cols(data.G_g) != K) {
         data.G_g = J(n, K, 0)
     }
+
     if (rows(data.mu_E_g_t) != num_zeval | cols(data.mu_E_g_t) != K) {
         data.mu_E_g_t = J(num_zeval, K, .)
     }
@@ -288,6 +303,11 @@ void didhetero_run_from_ado()
     string scalar bwselect, bw_str
     string rowvector bw_tokens
     real scalar i
+    real scalar _profile_flag
+
+    // === Read profile flag ===
+    _profile_flag = (st_local("_dh_profile") == "1")
+    if (_profile_flag) timer_clear()
 
     // === Read remaining Stata locals ===
     pretrend   = strtoreal(st_local("pretrend"))
@@ -295,6 +315,42 @@ void didhetero_run_from_ado()
     bstrap     = strtoreal(st_local("bstrap"))
     seed       = strtoreal(st_local("seed"))
     bwselect   = st_local("bwselect")
+
+    // Read verbose flag from ADO layer
+    _dh_data.verbose = strtoreal(st_local("_dh_verbose"))
+    if (_dh_data.verbose >= .) _dh_data.verbose = 0
+
+    // Read GPS strict mode flag from ADO layer (default 0 = soft failure)
+    _dh_data.gps_strict = strtoreal(st_local("_dh_gps_strict"))
+    if (_dh_data.gps_strict >= .) _dh_data.gps_strict = 0
+
+    // Read RBC flag from ADO layer (default 0)
+    _dh_data.rbc = strtoreal(st_local("rbc_flag"))
+    if (_dh_data.rbc >= .) _dh_data.rbc = 0
+
+    // Read undersmooth flag from ADO layer (default 0)
+    _dh_data.undersmooth = strtoreal(st_local("undersmooth_flag"))
+    if (_dh_data.undersmooth >= .) _dh_data.undersmooth = 0
+    if (_dh_data.undersmooth) _dh_data.bw_adjusted = 0
+
+    // Read KDE trim flag (default 0 = no trim, backward compatible)
+    _dh_data.kde_trim = strtoreal(st_local("kdetrim"))
+    if (_dh_data.kde_trim >= .) _dh_data.kde_trim = 0
+
+    // Read GPS trim bounds from ADO layer
+    {
+        string rowvector _gpstrim_tokens
+        _gpstrim_tokens = tokens(st_local("gpstrim"))
+        if (cols(_gpstrim_tokens) == 2) {
+            _dh_data.gps_trim_lo = strtoreal(_gpstrim_tokens[1])
+            _dh_data.gps_trim_hi = strtoreal(_gpstrim_tokens[2])
+        }
+        else {
+            _dh_data.gps_trim_lo = 0
+            _dh_data.gps_trim_hi = 1
+        }
+    }
+    _dh_data.gps_n_trimmed = 0
 
     // Parse manual bandwidth if specified
     bw_str = st_local("bw")
@@ -314,7 +370,7 @@ void didhetero_run_from_ado()
     // =========================================================================
     // Check if user already specified gteval (via _didhetero_set_user_gteval)
     if (_dh_data.num_gteval == . | _dh_data.num_gteval == 0) {
-        printf("{txt}Building (g,t) evaluation pairs...\n")
+        if (_dh_data.verbose) printf("{txt}Building (g,t) evaluation pairs...\n")
         didhetero_build_gteval(_dh_data, _dh_data.anticipation,
             _dh_data.control_group, pretrend, uniformall)
 
@@ -333,7 +389,7 @@ void didhetero_run_from_ado()
             _dh_data.control_group,
             pretrend)
 
-        printf("{txt}Using user-specified (g,t) evaluation pairs\n")
+        if (_dh_data.verbose) printf("{txt}Using user-specified (g,t) evaluation pairs\n")
         // Compute support and auxiliary variables for Stage 1 dispatch
         _dh_data.supp_g = sort(uniqrows(_dh_data.G), 1)
         _dh_data.supp_t = sort(uniqrows(_dh_data.t_vals), 1)
@@ -351,7 +407,7 @@ void didhetero_run_from_ado()
         }
     }
 
-    printf("{txt}  Found %g valid (g,t) pairs\n", _dh_data.num_gteval)
+    if (_dh_data.verbose) printf("{txt}  Found %g valid (g,t) pairs\n", _dh_data.num_gteval)
 
     // =========================================================================
     // Step 2: Initialize core estimation arrays
@@ -359,16 +415,39 @@ void didhetero_run_from_ado()
     didhetero_init_core_arrays(_dh_data, _dh_data.num_gteval)
 
     // =========================================================================
-    // Step 3: Stage 1 — GPS + OR + KDE
+    // Step 3: Stage 1 - GPS + OR + KDE
+    //
+    // Per Theorem 3: GPS/OR first-stage parameters converge at O_P(n^{-1/2})
+    // (parametric rate), faster than nonparametric O_P(n^{-1/5}), so they
+    // have no first-order influence on asymptotic distribution.
     // =========================================================================
-    printf("{txt}Stage 1: Parametric estimation (GPS + OR) + KDE...\n")
+    if (_dh_data.verbose) printf("{txt}Stage 1: Parametric estimation (GPS + OR) + KDE...\n")
+    if (_profile_flag) timer_on(1)
     s1 = didhetero_stage1_dispatch(_dh_data, _dh_data.gteval, _dh_data.geval,
              _dh_data.control_group, _dh_data.anticipation, _dh_data.zeval)
 
     // Store density estimates in data struct for SE computation
     _dh_data.kd0_Z = s1.kd0_Z
+    _dh_data.kde_trimmed = s1.kde_trimmed
 
-    printf("{txt}  GPS, OR, and density estimation complete\n")
+    // Apply KDE trim: if enabled, set trimmed points' density to missing
+    // so downstream SE computation produces SE=. for unreliable points
+    if (_dh_data.kde_trim == 1 & rows(_dh_data.kde_trimmed) > 0) {
+        real scalar _trim_r, _trim_count
+        _trim_count = 0
+        for (_trim_r = 1; _trim_r <= rows(_dh_data.kde_trimmed); _trim_r++) {
+            if (_dh_data.kde_trimmed[_trim_r] == 1) {
+                _dh_data.kd0_Z[_trim_r] = .
+                _trim_count++
+            }
+        }
+        if (_trim_count > 0) {
+            printf("{txt}KDE trim: %g evaluation point(s) marked as unreliable (SE/CI set to missing)\n", _trim_count)
+        }
+    }
+
+    if (_profile_flag) timer_off(1)
+    if (_dh_data.verbose) printf("{txt}  GPS, OR, and density estimation complete\n")
 
     // Store Stage 1 results as external globals
     external real matrix _dh_gps_mat
@@ -382,29 +461,96 @@ void didhetero_run_from_ado()
     // =========================================================================
     // Step 4: Bandwidth selection pre-loop
     // =========================================================================
-    printf("{txt}Bandwidth selection (%s)...\n", bwselect)
-    bw_vec = didhetero_bw_preloop(_dh_data, s1.gps_mat, s1.or_mat,
-                 s1.kd0_Z, s1.kd1_Z, bwselect, bw_manual)
+    if (_dh_data.verbose) printf("{txt}Bandwidth selection (%s)...\n", bwselect)
+    if (_profile_flag) timer_on(2)
 
-    printf("{txt}  Bandwidths: ")
-    for (i = 1; i <= rows(bw_vec); i++) {
-        printf("%9.6f ", bw_vec[i])
-        if (mod(i, 8) == 0 & i < rows(bw_vec)) printf("\n              ")
+    // RBC mode: force IMSE1 for bandwidth selection (p=1 rate)
+    {
+        string scalar _bwselect_for_preloop
+        _bwselect_for_preloop = bwselect
+        if (_dh_data.rbc) {
+            _bwselect_for_preloop = "IMSE1"
+            if (_dh_data.verbose) printf("{txt}  RBC mode: using IMSE1 bandwidth (LLR rate)\n")
+        }
+        bw_vec = didhetero_bw_preloop(_dh_data, s1.gps_mat, s1.or_mat,
+                     s1.kd0_Z, s1.kd1_Z, _bwselect_for_preloop, bw_manual)
     }
-    printf("\n")
+
+    if (_profile_flag) timer_off(2)
+
+    // === Undersmooth adaptive adjustment (Assumption 4(iii)) ===
+    if (_dh_data.undersmooth) {
+        _dh_data.bw_adjusted = _didhetero_bw_adjust_undersmooth(
+            bw_vec, _dh_data.n, 1)
+    }
+
+    if (_dh_data.verbose) {
+        printf("{txt}  Bandwidths: ")
+        for (i = 1; i <= rows(bw_vec); i++) {
+            printf("%9.6f ", bw_vec[i])
+            if (mod(i, 8) == 0 & i < rows(bw_vec)) printf("\n              ")
+        }
+        printf("\n")
+    }
+
+    // =========================================================================
+    // Step 4b: RBC override — switch to porder=2 and const_V2 for estimation
+    //
+    // Simple RBC (paper Section 3.3): use LLR(p=1) IMSE bandwidth for
+    // LQR(p=2) estimation. This is equivalent to bias-corrected LLR without
+    // explicit bias correction or SE adjustment.
+    // =========================================================================
+    if (_dh_data.rbc) {
+        _dh_data.porder = 2
+        _dh_data.const_V = _dh_kc.const_V2
+        if (_dh_data.verbose) {
+            printf("{txt}  RBC: estimation uses porder=2 with LLR-IMSE bandwidth\n")
+        }
+    }
 
     // =========================================================================
     // Step 5: Stage 2/3 — DR estimation + SE + analytical UCB + bootstrap UCB
     // =========================================================================
-    printf("{txt}Stage 2/3: DR estimation")
-    if (bstrap) {
-        printf(" + bootstrap (%g iterations)", _dh_data.biters)
+    if (_dh_data.verbose) {
+        printf("{txt}Stage 2/3: DR estimation")
+        if (bstrap) {
+            printf(" + bootstrap (%g iterations)", _dh_data.biters)
+        }
+        printf("...\n")
     }
-    printf("...\n")
 
     est = didhetero_stage23(_dh_data, s1.gps_mat, s1.or_mat, bw_vec, bwselect, seed)
 
-    printf("{txt}Estimation complete.\n")
+    if (_dh_data.verbose) printf("{txt}Estimation complete.\n")
+
+    // === Output performance profile report ===
+    if (_profile_flag) {
+        real scalar _pf_t1, _pf_t2, _pf_t3, _pf_t4, _pf_t5, _pf_total
+        _pf_t1 = timer_value(1)[1,1]
+        _pf_t2 = timer_value(2)[1,1]
+        _pf_t3 = timer_value(3)[1,1]
+        _pf_t4 = timer_value(4)[1,1]
+        _pf_t5 = timer_value(5)[1,1]
+        _pf_total = _pf_t1 + _pf_t2 + _pf_t3 + _pf_t4 + _pf_t5
+
+        printf("\n{txt}Performance Profile (n=%g, num_gt=%g, num_z=%g):\n",
+               _dh_data.n, _dh_data.num_gteval, _dh_data.num_zeval)
+        if (_pf_total > 0) {
+            printf("{txt}  GPS/OR estimation:   %8.2fs (%4.1f%%)\n", _pf_t1, _pf_t1/_pf_total*100)
+            printf("{txt}  Bandwidth selection: %8.2fs (%4.1f%%)\n", _pf_t2, _pf_t2/_pf_total*100)
+            printf("{txt}  CATT estimation:     %8.2fs (%4.1f%%)\n", _pf_t3, _pf_t3/_pf_total*100)
+            printf("{txt}  Analytical SE/UCB:   %8.2fs (%4.1f%%)\n", _pf_t4, _pf_t4/_pf_total*100)
+            printf("{txt}  Bootstrap:           %8.2fs (%4.1f%%)\n", _pf_t5, _pf_t5/_pf_total*100)
+        }
+        else {
+            printf("{txt}  GPS/OR estimation:   %8.2fs\n", _pf_t1)
+            printf("{txt}  Bandwidth selection: %8.2fs\n", _pf_t2)
+            printf("{txt}  CATT estimation:     %8.2fs\n", _pf_t3)
+            printf("{txt}  Analytical SE/UCB:   %8.2fs\n", _pf_t4)
+            printf("{txt}  Bootstrap:           %8.2fs\n", _pf_t5)
+        }
+        printf("{txt}  Total:               %8.2fs\n", _pf_total)
+    }
 
     // =========================================================================
     // Step 6: Store results in Stata matrices
@@ -552,6 +698,12 @@ void didhetero_post_results(
     // kd0_Z: R x 1 density estimates
     st_matrix("e(kd0_Z)", data.kd0_Z')
 
+    // kde_trimmed: R x 1 indicator for trimmed (low-density) evaluation points
+    if (rows(data.kde_trimmed) > 0) {
+        st_matrix("e(kde_trimmed)", data.kde_trimmed')
+    }
+    st_numscalar("e(kde_trim)", data.kde_trim)
+
     // kd1_Z: R x 1 density derivative estimates
     {
         external real colvector _dh_kd1_Z
@@ -560,6 +712,15 @@ void didhetero_post_results(
 
     // Z_supp: support points
     st_matrix("e(Z_supp)", data.Z_supp')
+
+    // GPS diagnostics: K x 6 matrix
+    // Columns: [converged, iterations, max_gradient, ll_final, n_extreme, cond_number]
+    if (rows(data.gps_diagnostics) > 0 & cols(data.gps_diagnostics) == 6) {
+        st_matrix("e(gps_diagnostics)", data.gps_diagnostics)
+        st_matrixcolstripe("e(gps_diagnostics)",
+            (J(6, 1, ""), ("converged" \ "iterations" \ "max_gradient" \
+             "ll_final" \ "n_extreme" \ "cond_number")))
+    }
 
     // gbar: upper bound on treatment timing; missing if never-treated units exist
     st_numscalar("e(gbar)", data.gbar)
@@ -570,6 +731,15 @@ void didhetero_post_results(
     st_numscalar("e(num_gteval)", data.num_gteval)
     st_numscalar("e(num_zeval)", data.num_zeval)
     st_numscalar("e(T)", data.T_num)
+
+    // RBC flag
+    st_numscalar("e(rbc)", data.rbc)
+
+    // Undersmooth adjustment flag (only published when undersmooth option is active)
+    if (data.undersmooth) {
+        st_numscalar("e(bw_adjusted)", data.bw_adjusted)
+        st_local("_dh_bw_adjusted", strofreal(data.bw_adjusted))
+    }
 }
 
 end

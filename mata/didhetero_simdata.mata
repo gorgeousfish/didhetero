@@ -1,5 +1,15 @@
 // =============================================================================
-// didhetero_simdata.mata — Core data generation for didhetero_simdata command
+// didhetero_simdata.mata
+// Core data generation for didhetero_simdata command
+//
+// Provides:
+//   - didhetero_simdata_core()      // Generate panel data for Monte Carlo
+//   - _didhetero_simdata_to_stata() // Push generated data to Stata dataset
+//
+// Requires:
+//   - (none -- standalone data generation)
+//
+// Paper reference: Section 5, simulation design
 // =============================================================================
 
 mata:

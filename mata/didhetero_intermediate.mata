@@ -1,19 +1,22 @@
 mata:
 
 // =============================================================================
+// didhetero_intermediate.mata
 // Intermediate variable construction for doubly robust estimation
 //
-// This module constructs the intermediate quantities required for computing
-// CATT estimates: the weighting variable R, the adjusted outcome difference
-// Y_tilde, and the products E and F.
+// Provides:
+//   - DidHeteroIntermediate struct  // Container for (g,t) intermediate vars
+//   - _didhetero_extract_gps()      // Extract GPS estimates for a (g,t) pair
+//   - _didhetero_extract_or()       // Extract OR predictions for a (g,t) pair
+//   - didhetero_intermediate_vars() // Construct R, Y_diff, E, F variables
 //
-// Functions:
-//   _didhetero_extract_gps()       - Extract GPS estimates for a given (g,t)
-//   _didhetero_extract_or()        - Extract outcome regression predictions
-//   didhetero_intermediate_vars()  - Construct all intermediate variables
+// Requires:
+//   - didhetero_types.mata          (DidHeteroData struct)
+//   - didhetero_utils_formula.mata  (didhetero_selectindex)
+//   - didhetero_utils_domain.mata   (didhetero_period_ord, didhetero_period_at,
+//                                    didhetero_period_col)
 //
-// Structure:
-//   DidHeteroIntermediate - Container for intermediate variables
+// Paper reference: Eq. 2.6, intermediate quantities R, Y_tilde, E, F
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -179,7 +182,7 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     real matrix G_g)
 {
     struct DidHeteroIntermediate scalar result
-    real colvector p_hat, G_ig, comp_ind, R_g, G_ord
+    real colvector p_hat, G_ig, comp_ind, R_g, G_ord, denom
     real colvector Y_t, Y_base, m_hat, Y_diff
     real scalar col_t, col_base, threshold_ord, base_label, i
 
@@ -211,7 +214,11 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     }
 
     // Compute the weighting variable R_{i,g,t}
-    R_g = (p_hat :* comp_ind) :/ (1 :- p_hat)
+    // Denominator protection: ensure (1 - p_hat) >= 1e-8
+    // Theoretical basis: Assumption 2.5 (overlap) requires p_{g,t}(X) < 1 - epsilon
+    // This truncation maintains consistency with GPS-layer truncation in didhetero_gps_logit()
+    denom = rowmax((J(rows(p_hat), 1, 1e-8), (1 :- p_hat)))
+    R_g = (p_hat :* comp_ind) :/ denom
 
     // Store group indicator in the G_g matrix for subsequent computations
     G_g[., id_gt] = G_ig

@@ -1,11 +1,12 @@
 {smcl}
-{* *! version 0.1.0}{...}
+{* *! version 1.0.0  20260701}{...}
 {viewerjumpto "Syntax" "catt_gt##syntax"}{...}
 {viewerjumpto "Description" "catt_gt##description"}{...}
 {viewerjumpto "Options" "catt_gt##options"}{...}
 {viewerjumpto "Remarks" "catt_gt##remarks"}{...}
 {viewerjumpto "Examples" "catt_gt##examples"}{...}
 {viewerjumpto "Stored results" "catt_gt##stored"}{...}
+{viewerjumpto "Technical notes" "catt_gt##technical"}{...}
 {viewerjumpto "References" "catt_gt##references"}{...}
 {viewerjumpto "Authors" "catt_gt##authors"}{...}
 {viewerjumpto "Also see" "catt_gt##alsosee"}{...}
@@ -46,9 +47,13 @@
 {synopt:{opt kernel(string)}}kernel function; {cmd:gau} or {cmd:epa}; default is {cmd:gau}{p_end}
 {synopt:{opt bwselect(string)}}bandwidth selection method; default is {cmd:IMSE1}{p_end}
 {synopt:{opt bw(numlist)}}manual bandwidth; requires {cmd:bwselect(manual)}{p_end}
+{synopt:{opt rbc}}robust bias-corrected inference via LQR with IMSE-LLR bandwidth{p_end}
+{synopt:{opt undersmooth}}auto-adjust bandwidth to undersmoothing bounds{p_end}
+{synopt:{opt gpstrim(# #)}}lower and upper GPS trimming bounds{p_end}
 
 {syntab:Inference}
-{synopt:{opt alp(#)}}significance level; default is {cmd:0.05}{p_end}
+{synopt:{opt level(#)}}confidence level; default is {cmd:c(level)} (usually 95){p_end}
+{synopt:{opt alp(#)}}significance level (deprecated; use {cmd:level()}){p_end}
 {synopt:{opt bstrap(true|false)}}multiplier bootstrap toggle; default is {cmd:true}{p_end}
 {synopt:{opt biters(#)}}bootstrap iterations; default is {cmd:1000}{p_end}
 {synopt:{opt seed(#)}}RNG seed for bootstrap reproducibility; default is {cmd:-1} (current RNG state){p_end}
@@ -64,6 +69,12 @@
 {synopt:{opt bstrap}}alias for {cmd:bstrap(true)}{p_end}
 {synopt:{opt nobstrap}}alias for {cmd:bstrap(false)}{p_end}
 {synopt:{opt nouniformall}}alias for {cmd:uniformall(false)}{p_end}
+
+{syntab:Diagnostics}
+{synopt:{opt verbose}}display diagnostic output during estimation{p_end}
+{synopt:{opt gpsstrict}}error on GPS non-convergence instead of warning{p_end}
+{synopt:{opt kdetrim}}trim low-density boundary evaluation points{p_end}
+{synopt:{opt profile}}display performance profile of computation stages{p_end}
 {synoptline}
 
 
@@ -180,8 +191,15 @@ the effective inference domain degenerates to uniform inference over
 {dlgtab:Inference}
 
 {phang}
+{opt level(#)} sets the confidence level for confidence intervals. Must
+be between 10 and 99.99. Default is the current Stata global setting
+{cmd:c(level)}, which is typically 95.
+
+{phang}
 {opt alp(#)} sets the significance level for confidence intervals. Must
-be strictly between 0 and 1. Default is {cmd:0.05}.
+be strictly between 0 and 1. This option is retained for backward
+compatibility; the preferred syntax is {cmd:level()}. When {cmd:alp()} is
+specified, {cmd:level()} is ignored.
 
 {phang}
 {opt bstrap(true|false)} toggles the multiplier bootstrap for uniform
@@ -240,6 +258,51 @@ aliases for {cmd:bstrap(true)}, {cmd:bstrap(false)}, and
 {cmd:uniformall(false)} respectively. They are retained for backward
 compatibility with earlier versions of the package. Do not combine a
 legacy flag with the corresponding {cmd:true|false} form.
+
+{dlgtab:Diagnostics}
+
+{phang}
+{opt verbose} enables diagnostic output during estimation. When specified,
+the command prints GPS convergence information, bandwidth selection details,
+and progress messages for each (g,t) pair. Default is off.
+
+{phang}
+{opt gpsstrict} forces the command to exit with an error when the GPS
+model fails to converge. By default, GPS non-convergence produces a warning
+and estimation continues using the last-iteration coefficients, which may
+be unreliable. Specifying {opt gpsstrict} is useful for diagnosing data
+issues such as complete or quasi-separation in treatment assignment.
+
+{phang}
+{opt kdetrim} enables trimming of evaluation points at the boundary of
+the covariate support where kernel density estimates are extremely low.
+When enabled, the standard errors and confidence intervals for evaluation
+points with near-zero density are set to missing rather than reporting
+unreliable estimates driven by sparse data.
+
+{phang}
+{opt gpstrim(# #)} specifies lower and upper bounds for GPS trimming.
+    Values must satisfy 0 < lower < upper < 1. When specified, GPS values
+    outside [lower, upper] are truncated to the boundary. This enforces the
+    overlap condition (Assumption 3) numerically. Default is no trimming.{p_end}
+
+{phang}
+{opt rbc} enables Simple Robust Bias-Corrected inference. Uses the
+    IMSE-optimal bandwidth for local linear regression (p=1) to estimate
+    CATT via local quadratic regression (p=2). This implements the recommended
+    inference strategy from Section 3.3 of Imai, Qin, and Yanagi (2025).
+    Cannot be combined with {opt bw()} or {opt bwselect(manual)}.{p_end}
+
+{phang}
+{opt undersmooth} automatically adjusts the selected bandwidth to
+    satisfy the undersmoothing condition (Assumption 4(iii)). If the IMSE
+    bandwidth exceeds the theoretical range [C*n^(-0.49), C*n^(-0.12)],
+    it is clamped to the nearest boundary. Adjustment details are reported.{p_end}
+
+{phang}
+{opt profile} displays a performance profile showing computation
+    time for each estimation stage (GPS/OR, bandwidth selection, CATT,
+    SE/UCB, bootstrap).{p_end}
 
 
 {marker remarks}{...}
@@ -342,6 +405,17 @@ reported confidence bands for inference.
 {synopt:{cmd:e(uniformall)}}1 if joint uniform bands requested, 0 otherwise{p_end}
 {synopt:{cmd:e(pretrend)}}1 if pre-trends testing was requested, 0 otherwise{p_end}
 
+{pstd}When {opt gpstrim()} is specified:{p_end}
+{synopt:{cmd:e(gps_trim_lo)}}lower GPS trimming bound{p_end}
+{synopt:{cmd:e(gps_trim_hi)}}upper GPS trimming bound{p_end}
+
+{pstd}When {opt rbc} is specified:{p_end}
+{synopt:{cmd:e(rbc)}}1 if RBC inference was used{p_end}
+
+{pstd}When {opt undersmooth} is specified:{p_end}
+{synopt:{cmd:e(undersmooth)}}1 if undersmoothing adjustment was requested{p_end}
+{synopt:{cmd:e(bw_adjusted)}}1 if bandwidth was actually adjusted{p_end}
+
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Macros}{p_end}
 {synopt:{cmd:e(cmd)}}{cmd:catt_gt}{p_end}
@@ -388,6 +462,28 @@ output:
 {synopt:{cmd:e(dh_t_vals)}}row vector of distinct time-period values{p_end}
 {synopt:{cmd:e(dh_gps_mat)}}stacked generalized propensity score fits by (g, unit){p_end}
 {synopt:{cmd:e(dh_or_mat)}}stacked outcome regression fits by (g, unit){p_end}
+
+
+{marker technical}{...}
+{title:Technical notes}
+
+{pstd}{opt rbc} implements the "Simple RBC" (Robust Bias-Corrected) inference
+approach. As shown in Section 3.3 of the reference paper, using the LLR
+IMSE-optimal bandwidth h_LL (rate n^{-1/5}) for LQR estimation achieves
+automatic bias correction without explicit analytical adjustment. The
+resulting estimator is numerically equivalent to bias-corrected LLR but
+avoids standard error inflation from bias correction.{p_end}
+
+{pstd}{opt gpstrim()} enforces the overlap condition (Assumption 3) by
+preventing GPS values from approaching 0 or 1. The technical variable
+R_{g,t} = p/(1-p) becomes numerically unstable when p approaches 1.
+Trimming at [0.01, 0.99] bounds R_{g,t} <= 99.{p_end}
+
+{pstd}{opt undersmooth} enforces Assumption 4(iii) which requires
+C*n^{-1/2+eps} <= h <= C*n^{-1/9-eps}. The upper bound ensures the
+asymptotic bias is dominated by variance (undersmoothing condition),
+which is necessary for the extreme value approximation in Theorem 2
+to provide valid uniform confidence bands.{p_end}
 
 
 {marker references}{...}

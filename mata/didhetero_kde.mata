@@ -1,10 +1,20 @@
 mata:
 
 // =============================================================================
-// Kernel density estimation with given bandwidth
+// didhetero_kde.mata
+// Kernel density estimation with given or automatic bandwidth
 //
-// Implements the standard KDE estimator:
-//   f_hat(z) = (1/nh) * sum(K((x_i - z)/h))
+// Provides:
+//   - didhetero_kde()          // KDE at given evaluation points with given bw
+//   - didhetero_kde_density()  // KDE with MSE-DPI automatic bandwidth
+//   - didhetero_kde_deriv()    // Density derivative estimation (p=3, v=2)
+//
+// Requires:
+//   - didhetero_kernel.mata            (didhetero_kernel_eval)
+//   - didhetero_bwselect_kde.mata      (didhetero_kdrobust)
+//   - didhetero_bwselect_lpdensity.mata(didhetero_lpdensity)
+//
+// Paper reference: Section 3.1, density estimation for variance
 // =============================================================================
 
 // -----------------------------------------------------------------------------

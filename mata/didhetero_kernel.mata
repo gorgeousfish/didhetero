@@ -4,13 +4,18 @@ mata:
 // didhetero_kernel.mata
 // Kernel functions and precomputed integral constants
 //
-// This file provides two core functions:
-//   1. didhetero_kernel_eval()   - Evaluate kernel function at given points
-//   2. didhetero_kernel_consts() - Initialize precomputed kernel integral constants
+// Provides:
+//   - didhetero_kernel_eval()   // Evaluate kernel function at given points
+//   - didhetero_kernel_consts() // Initialize precomputed kernel integral constants
+//
+// Requires:
+//   - didhetero_types.mata      (DidHeteroKernelConsts struct)
 //
 // Supported kernels:
 //   "epa" - Epanechnikov: K(u) = 0.75 * (1 - u^2) * I(|u| <= 1)
 //   "gau" - Gaussian:     K(u) = phi(u) (standard normal density)
+//
+// Paper reference: Section 3.1 kernel definitions
 // =============================================================================
 
 // -----------------------------------------------------------------------------

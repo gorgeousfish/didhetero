@@ -91,16 +91,62 @@ program define catt_gt, eclass
         [Kernel(string)]                             ///
         [Control_group(string)]                      ///
         [Anticipation(integer 0)]                    ///
-        [Alp(real 0.05)]                             ///
+        [Alp(real -1)]                               ///
+        [Level(cilevel)]                             ///
         [Biters(integer 1000)]                       ///
         [noBSTrap]                                   ///
         [noUNIFormall]                               ///
         [PREtrend]                                   ///
         [BWselect(string)]                           ///
         [BW(numlist)]                                ///
-        [SEed(integer -1)]
+        [SEed(integer -1)]                           ///
+        [VERBose]                                    ///
+        [GPSStrict]                                  ///
+        [KDETrim]                                    ///
+        [GPSTrim(numlist)]                            ///
+        [RBC]                                         ///
+        [UNDERSmooth]                                    ///
+        [PROFile]
 
     local depvar `varlist'
+
+    // Resolve significance level: alp() takes priority if explicitly given;
+    // otherwise compute from level() (which defaults to c(level)).
+    if `alp' != -1 {
+        // User explicitly specified alp(); validate range
+        if `alp' <= 0 | `alp' >= 1 {
+            di as error "alp() must be strictly between 0 and 1"
+            exit 198
+        }
+    }
+    else {
+        // Derive from level option (cilevel defaults to c(level))
+        local alp = 1 - `level'/100
+    }
+
+    // Verbose flag: default off (quiet mode)
+    if "`verbose'" != "" {
+        local _dh_verbose 1
+    }
+    else {
+        local _dh_verbose 0
+    }
+
+    // GPS strict mode: error on non-convergence (default off)
+    if "`gpsstrict'" != "" {
+        local _dh_gps_strict 1
+    }
+    else {
+        local _dh_gps_strict 0
+    }
+
+    // Profile flag: performance profiling (default off)
+    if "`profile'" != "" {
+        local _dh_profile 1
+    }
+    else {
+        local _dh_profile 0
+    }
 
     // Set string defaults
     if "`kernel'" == "" local kernel "gau"
@@ -166,14 +212,9 @@ program define catt_gt, eclass
 
     // Protect user data and apply [if] [in] restrictions
     preserve
-
     if "`if'`in'" != "" {
         quietly keep `if' `in'
     }
-
-    // Preserve previous estimation results for recovery on failure
-    tempname _dh_prev_est
-    capture _est hold `_dh_prev_est', restore nullok
 
     capture noisily _dh_ensure_backend
     local _dh_rc = _rc
@@ -202,7 +243,11 @@ program define catt_gt, eclass
         `uniformall'                          ///
         `pretrend'                            ///
         bwselect(`bwselect')                  ///
-        bw(`bw')
+        bw(`bw')                              ///
+        `kdetrim'                             ///
+        gpstrim(`gpstrim')                    ///
+        `rbc'                                 ///
+        `undersmooth'
 
     // Retrieve validated parameters
     local depvar    `_dh_depvar'
@@ -223,8 +268,12 @@ program define catt_gt, eclass
     local bstrap    `_dh_bstrap'
     local uniform   `_dh_uniform'
     local pretrend  `_dh_pretrend'
+    local kdetrim   `_dh_kdetrim'
     local bwselect  `_dh_bwselect'
     local bw        `_dh_bw'
+    local gpstrim   `_dh_gpstrim'
+    local rbc_flag  `_dh_rbc'
+    local undersmooth_flag `_dh_undersmooth'
     local n_total   `_dh_n'
 
     // Set biters to 0 when bootstrap is disabled
@@ -239,7 +288,8 @@ program define catt_gt, eclass
     di as text "  Kernel:           `kernel'"
     di as text "  Control group:    `control'"
     di as text "  Anticipation:     `anticip'"
-    di as text "  Significance:     `alp'"
+    local _dh_level = 100 * (1 - `alp')
+    di as text "  Confidence level: `_dh_level'%"
     if "`xformula_display'" != "" {
         di as text "  Covariate spec:   `xformula_display'"
     }
@@ -334,6 +384,8 @@ program define catt_gt, eclass
     capture _est unhold `_dh_prev_est', not
 
     ereturn local cmd "catt_gt"
+    ereturn local predict "catt_gt_predict"
+    ereturn local estat_cmd "catt_gt_estat"
     ereturn local depvar     "`depvar'"
     ereturn local idvar      "`id'"
     ereturn local timevar    "`time'"
@@ -343,10 +395,11 @@ program define catt_gt, eclass
     ereturn local control_group "`control'"
     ereturn local control    "`control'"
     ereturn local bwselect   "`bwselect'"
-    ereturn scalar porder    = `porder'
+    ereturn scalar porder    = cond(`rbc_flag', 2, `porder')
     ereturn scalar anticipation = `anticip'
     ereturn scalar anticip   = `anticip'
     ereturn scalar alp       = `alp'
+    ereturn scalar level     = 100 * (1 - `alp')
     ereturn scalar bstrap    = `bstrap'
     ereturn scalar biters    = `biters'
     local _dh_effective_seed = .
@@ -360,6 +413,16 @@ program define catt_gt, eclass
     }
     ereturn scalar uniformall = `uniform'
     ereturn scalar pretrend  = `pretrend'
+    ereturn scalar rbc       = `rbc_flag'
+    if `undersmooth_flag' == 1 {
+        ereturn scalar undersmooth = 1
+        if "`_dh_bw_adjusted'" != "" {
+            ereturn scalar bw_adjusted = `_dh_bw_adjusted'
+        }
+        else {
+            ereturn scalar bw_adjusted = 0
+        }
+    }
 
     // Display results table
     _didhetero_display

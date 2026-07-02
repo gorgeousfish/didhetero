@@ -1,15 +1,20 @@
 mata:
 
 // =============================================================================
-// Outcome Regression (OR) Estimation
+// didhetero_or.mata
+// Outcome Regression (OR) estimation for heterogeneous DiD
 //
-// This module implements outcome regression estimation for heterogeneous
-// treatment effects in difference-in-differences designs.
+// Provides:
+//   - didhetero_period_col()   // Locate period index in time vector
+//   - didhetero_or_ols()       // OLS estimation with full-sample prediction
+//   - didhetero_or_estimate()  // Main OR routine for all (g,t) pairs
 //
-// Functions:
-//   didhetero_period_col()  - Locate period index in time vector
-//   didhetero_or_ols()      - OLS estimation with full-sample prediction
-//   didhetero_or_estimate() - Main estimation routine
+// Requires:
+//   - didhetero_types.mata          (DidHeteroData struct)
+//   - didhetero_utils_domain.mata   (didhetero_period_ord, didhetero_period_at)
+//   - didhetero_utils_formula.mata  (didhetero_selectindex)
+//
+// Paper reference: Section 2.4, outcome regression model
 // =============================================================================
 
 // -----------------------------------------------------------------------------

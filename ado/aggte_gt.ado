@@ -21,6 +21,7 @@ program define aggte_gt, eclass
               POrder(integer 2) ///
               BWSelect(string) BW(numlist) ///
               UNIFormall(string) ///
+              Level(cilevel) ///
               SEed(integer -1)]
 
     // -------------------------------------------------------------
@@ -46,11 +47,15 @@ program define aggte_gt, eclass
 
     capture confirm scalar e(alp)
     if _rc {
-        local alp 0.05
+        local alp = 1 - `level'/100
     }
     else {
         local alp = e(alp)
-        if missing(`alp') local alp 0.05
+        if missing(`alp') local alp = 1 - `level'/100
+    }
+    // Allow user to override with level()
+    if `level' != c(level) {
+        local alp = 1 - `level'/100
     }
 
     // -------------------------------------------------------------
@@ -167,7 +172,7 @@ program define aggte_gt, eclass
              _agg_base_dh_or_mat _agg_base_mu_G_g _agg_base_catt_est ///
              _agg_base_catt_se _agg_base_kd0_Z _agg_base_kd1_Z ///
              _agg_base_b _agg_base_V ///
-             _agg_base_Z_supp
+             _agg_base_Z_supp _agg_base_gps_diagnostics
     matrix `_agg_base_results' = e(results)
     matrix `_agg_base_estimate' = e(results)
     capture confirm matrix e(b)
@@ -208,6 +213,11 @@ program define aggte_gt, eclass
     matrix `_agg_base_kd0_Z' = e(kd0_Z)
     matrix `_agg_base_kd1_Z' = e(kd1_Z)
     matrix `_agg_base_Z_supp' = e(Z_supp)
+    capture confirm matrix e(gps_diagnostics)
+    local _has_base_gps_diag = (_rc == 0)
+    if `_has_base_gps_diag' {
+        matrix `_agg_base_gps_diagnostics' = e(gps_diagnostics)
+    }
 
     local _agg_base_gbar = e(gbar)
     capture confirm scalar e(gbar_isinf)
@@ -288,6 +298,9 @@ program define aggte_gt, eclass
     ereturn matrix kd0_Z = `_agg_base_kd0_Z'
     ereturn matrix kd1_Z = `_agg_base_kd1_Z'
     ereturn matrix Z_supp = `_agg_base_Z_supp'
+    if `_has_base_gps_diag' {
+        ereturn matrix gps_diagnostics = `_agg_base_gps_diagnostics'
+    }
 
     ereturn scalar gbar = `_agg_base_gbar'
     ereturn scalar gbar_isinf = `_agg_base_gbar_isinf'
@@ -543,6 +556,7 @@ program define aggte_gt, eclass
     ereturn scalar anticipation = `_agg_base_anticipation'
     ereturn scalar anticip = `_agg_base_anticip'
     ereturn scalar alp = `alp'
+    ereturn scalar level = 100 * (1 - `alp')
     ereturn scalar bstrap = `_bstrap_flag'
     ereturn scalar biters = `_aggte_effective_biters'
     ereturn scalar seed_request = `seed'
@@ -597,7 +611,7 @@ program define _aggte_normalize_upstream_e, eclass
              _agg_init_dh_G_unit _agg_init_dh_t_vals _agg_init_dh_gps_mat ///
              _agg_init_dh_or_mat _agg_init_mu_G_g _agg_init_catt_est ///
              _agg_init_catt_se _agg_init_kd0_Z _agg_init_kd1_Z ///
-             _agg_init_Z_supp
+             _agg_init_Z_supp _agg_init_gps_diagnostics
 
     matrix `_agg_init_results' = e(results)
     matrix `_agg_init_estimate' = e(results)
@@ -629,6 +643,11 @@ program define _aggte_normalize_upstream_e, eclass
     matrix `_agg_init_kd0_Z' = e(kd0_Z)
     matrix `_agg_init_kd1_Z' = e(kd1_Z)
     matrix `_agg_init_Z_supp' = e(Z_supp)
+    capture confirm matrix e(gps_diagnostics)
+    local _agg_init_has_gps_diag = (_rc == 0)
+    if `_agg_init_has_gps_diag' {
+        matrix `_agg_init_gps_diagnostics' = e(gps_diagnostics)
+    }
 
     local _agg_init_gbar = e(gbar)
     capture confirm scalar e(gbar_isinf)
@@ -723,6 +742,9 @@ program define _aggte_normalize_upstream_e, eclass
     ereturn matrix kd0_Z = `_agg_init_kd0_Z'
     ereturn matrix kd1_Z = `_agg_init_kd1_Z'
     ereturn matrix Z_supp = `_agg_init_Z_supp'
+    if `_agg_init_has_gps_diag' {
+        ereturn matrix gps_diagnostics = `_agg_init_gps_diagnostics'
+    }
 
     ereturn scalar gbar = `_agg_init_gbar'
     ereturn scalar gbar_isinf = `_agg_init_gbar_isinf'

@@ -33,6 +33,7 @@ void __dh_capture_aggte_post_state(real scalar has_c_check)
     external real matrix __dh_agg_kd1_Z
     external real matrix __dh_agg_Z_supp
     external real matrix __dh_agg_c_check
+    external real matrix __dh_agg_gps_diagnostics
 
     __dh_agg_results         = st_matrix("e(results)")
     __dh_agg_estimate        = st_matrix("e(Estimate)")
@@ -63,6 +64,14 @@ void __dh_capture_aggte_post_state(real scalar has_c_check)
     __dh_agg_kd0_Z           = st_matrix("e(kd0_Z)")
     __dh_agg_kd1_Z           = st_matrix("e(kd1_Z)")
     __dh_agg_Z_supp          = st_matrix("e(Z_supp)")
+
+    // GPS diagnostics (may not exist for older estimation results)
+    if (rows(st_matrix("e(gps_diagnostics)")) > 0) {
+        __dh_agg_gps_diagnostics = st_matrix("e(gps_diagnostics)")
+    }
+    else {
+        __dh_agg_gps_diagnostics = J(0, 0, .)
+    }
 
     if (has_c_check) {
         __dh_agg_c_check = st_matrix("e(c_check)")
@@ -112,6 +121,7 @@ void __dh_restore_aggte_post_state(
     external real matrix __dh_agg_kd1_Z
     external real matrix __dh_agg_Z_supp
     external real matrix __dh_agg_c_check
+    external real matrix __dh_agg_gps_diagnostics
 
     st_matrix("e(results)", __dh_agg_results)
     st_matrix("e(Estimate)", __dh_agg_estimate)
@@ -143,6 +153,12 @@ void __dh_restore_aggte_post_state(
     st_matrix("e(kd0_Z)", __dh_agg_kd0_Z)
     st_matrix("e(kd1_Z)", __dh_agg_kd1_Z)
     st_matrix("e(Z_supp)", __dh_agg_Z_supp)
+    if (rows(__dh_agg_gps_diagnostics) > 0) {
+        st_matrix("e(gps_diagnostics)", __dh_agg_gps_diagnostics)
+        st_matrixcolstripe("e(gps_diagnostics)",
+            (J(6, 1, ""), ("converged" \ "iterations" \ "max_gradient" \
+             "ll_final" \ "n_extreme" \ "cond_number")))
+    }
     if (has_c_check) {
         st_matrix("e(c_check)", __dh_agg_c_check)
     }

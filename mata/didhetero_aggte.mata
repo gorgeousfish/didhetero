@@ -1,10 +1,26 @@
 // =============================================================================
-// Mata aggregation module for heterogeneous treatment effect estimation
+// didhetero_aggte.mata
+// Aggregation module for heterogeneous treatment effect estimation
 //
-// This module implements the construction and filtering of (g, t, eval) triples
-// for four aggregation types: dynamic, group, calendar, and simple. The aggregation
-// combines conditional average treatment effects (CATT) across groups (g),
-// time periods (t), and evaluation points (eval).
+// Provides:
+//   - didhetero_build_gteeval()       // Build (g,t,eval) triples for aggregation
+//   - didhetero_aggte_weights()       // Compute aggregation weights
+//   - didhetero_aggte_xi()            // Compute aggregated influence function
+//   - didhetero_aggte_J()             // Compute Jacobian for aggte variance
+//   - didhetero_aggte_bw_pass1()      // Bandwidth selection for aggte
+//   - didhetero_aggte_se()            // Standard errors and analytical UCB
+//   - didhetero_aggte_bootstrap()     // Bootstrap UCB for aggregated params
+//
+// Requires:
+//   - didhetero_types.mata              (DidHeteroData, AggtResult, DidHeteroCattResult)
+//   - didhetero_lpr.mata                (didhetero_lpr)
+//   - didhetero_bwselect_lp.mata        (_didhetero_lpbwselect_mse, _didhetero_lpbwselect_imse)
+//   - didhetero_bootstrap_engine.mata   (dh_boot_generate_weights, dh_boot_quantile,
+//                                        dh_boot_compute_sup)
+//   - didhetero_utils_domain.mata       (didhetero_period_ord)
+//   - didhetero_catt_core.mata          (didhetero_catt_core)
+//
+// Paper reference: Section 4, aggregation of CATT into summary parameters
 // =============================================================================
 
 mata:
@@ -52,8 +68,10 @@ real colvector _aggte_time_support_from_gteval(real matrix gteval)
 // -----------------------------------------------------------------------------
 // _aggte_dynamic_event_time()
 //
-// Compute the event time as the ordinal distance between group adoption time
-// g and evaluation period t on the ordered time support.
+// Compute the event time as the natural time difference e = t - g, consistent
+// with the paper definition (Imai, Qin, Yanagi 2025, Section 4) and the R
+// package implementation.  Validates that both g and t exist in the ordered
+// time support for error checking purposes.
 // -----------------------------------------------------------------------------
 real scalar _aggte_dynamic_event_time(
     real scalar g0,
@@ -67,10 +85,10 @@ real scalar _aggte_dynamic_event_time(
     t_ord = didhetero_period_ord(t0, t_support)
 
     if (g_ord >= . | t_ord >= .) {
-        _error(3498, context + ": found a (g,t) pair outside the ordered time support")
+        _dh_error_estimation("aggte", context + ": found a (g,t) pair outside the ordered time support")
     }
 
-    return(t_ord - g_ord)
+    return(t0 - g0)
 }
 
 // -----------------------------------------------------------------------------
@@ -106,7 +124,7 @@ real matrix didhetero_build_gteeval(
     // Input validation
     if (type != "dynamic" & type != "group" &
         type != "calendar" & type != "simple") {
-        _error(3498, "invalid aggregation type: " + type)
+        _dh_error_estimation("aggte", "invalid aggregation type: " + type)
     }
 
     // Pre-filter: exclude pre-treatment periods (t - g < 0) for group/calendar/simple
@@ -131,7 +149,7 @@ real matrix didhetero_build_gteeval(
         else {
             gbar_ord = didhetero_period_ord(gbar, dyn_support)
             if (gbar_ord >= .) {
-                _error(3498, "aggte_gt: failed to locate gbar on the ordered time support")
+                _dh_error_estimation("aggte", "failed to locate gbar on the ordered time support")
             }
         }
     }
@@ -220,7 +238,7 @@ void didhetero_aggte_weights(
     // Input validation
     if (type != "dynamic" & type != "group" &
         type != "calendar" & type != "simple") {
-        _error(3498, "invalid aggregation type: " + type)
+        _dh_error_estimation("aggte", "invalid aggregation type: " + type)
     }
 
     // Initialize outputs
@@ -323,7 +341,7 @@ void didhetero_aggte_xi(
 
     // Input validation
     if (type != "dynamic" & type != "calendar" & type != "simple") {
-        _error(3498, "invalid aggregation type for xi: " + type)
+        _dh_error_estimation("aggte", "invalid aggregation type for xi: " + type)
     }
 
     // Dynamic / calendar type: two-term formula
@@ -893,7 +911,7 @@ real scalar didhetero_aggte_bw_pass1(
 
     // Input validation
     if (bwselect != "IMSE1" & bwselect != "IMSE2" & bwselect != "US1") {
-        _error(3498, "invalid bwselect for aggte Pass 1: " + bwselect)
+        _dh_error_estimation("aggte", "invalid bwselect for aggte Pass 1: " + bwselect)
     }
 
     R_eval = rows(zeval)
@@ -1115,7 +1133,7 @@ void didhetero_aggte_se(
         }
     }
     else {
-        _error(3498, "invalid porder for aggte SE: must be 1 or 2")
+        _dh_error_estimation("aggte", "invalid porder for aggte SE: must be 1 or 2")
     }
 
     // Lambda selection for analytical uniform confidence bands
@@ -1126,7 +1144,7 @@ void didhetero_aggte_se(
         lambda = 0.5
     }
     else {
-        _error(3498, "invalid kernel for aggte SE: " + kernel)
+        _dh_error_estimation("aggte", "invalid kernel for aggte SE: " + kernel)
     }
 
     // Guard: invalid inputs
@@ -1266,7 +1284,7 @@ void didhetero_aggte_bootstrap(
 
     // --- Input validation ---
     if (biters < 1) {
-        _error(3498, "biters must be >= 1")
+        _dh_error_estimation("aggte", "biters must be >= 1")
     }
 
     // --- Get kernel constants ---
@@ -1292,7 +1310,7 @@ void didhetero_aggte_bootstrap(
             Psi_r = (I_4_K1 :- u_r:^2 :* I_2_K1) :/ (I_4_K1 - I_2_K1^2)
         }
         else {
-            _error(3498, "porder must be 1 or 2")
+            _dh_error_estimation("aggte", "porder must be 1 or 2")
         }
 
         // Perturbation vector = Psi_r .* U_hat[.,r] .* kv_r
@@ -1421,13 +1439,13 @@ void didhetero_aggte_pass2(
 
     // Input validation
     if (h_agg <= 0 | h_agg >= .) {
-        _error(3498, "didhetero_aggte_pass2: h_agg must be > 0 and non-missing")
+        _dh_error_estimation("aggte", "h_agg must be > 0 and non-missing")
     }
     if (rows(gteeval_sub) == 0) {
-        _error(3498, "didhetero_aggte_pass2: gteeval_sub is empty")
+        _dh_error_estimation("aggte", "gteeval_sub is empty")
     }
     if (cols(gteeval_sub) != 3) {
-        _error(3498, "didhetero_aggte_pass2: gteeval_sub must have 3 columns (g, t, eval)")
+        _dh_error_estimation("aggte", "gteeval_sub must have 3 columns (g, t, eval)")
     }
 
     // Variable initialization
@@ -1482,15 +1500,15 @@ void didhetero_aggte_pass2(
 
     // Dimension validation
     if (cols(catt_est_new) != num_gte) {
-        _error(3498, sprintf("aggte_pass2: catt_est cols=%g, expected num_gte=%g",
+        _dh_error_estimation("aggte", sprintf("catt_est cols=%g, expected num_gte=%g",
                              cols(catt_est_new), num_gte))
     }
     if (cols(G_g_new) != num_gte) {
-        _error(3498, sprintf("aggte_pass2: G_g cols=%g, expected num_gte=%g",
+        _dh_error_estimation("aggte", sprintf("G_g cols=%g, expected num_gte=%g",
                              cols(G_g_new), num_gte))
     }
     if (cols(mu_G_g_new) != num_gte) {
-        _error(3498, sprintf("aggte_pass2: mu_G_g cols=%g, expected num_gte=%g",
+        _dh_error_estimation("aggte", sprintf("mu_G_g cols=%g, expected num_gte=%g",
                              cols(mu_G_g_new), num_gte))
     }
 
@@ -1566,7 +1584,7 @@ real colvector _didhetero_aggte_build_eval(
             }
         }
         if (n_raw == 0) {
-            _error(3498, "aggte_gt: no post-treatment pairs found for group type")
+            _dh_error_estimation("aggte", "no post-treatment pairs found for group type")
         }
         raw_vals = J(n_raw, 1, .)
         j = 0
@@ -1587,7 +1605,7 @@ real colvector _didhetero_aggte_build_eval(
             }
         }
         if (n_raw == 0) {
-            _error(3498, "aggte_gt: no post-treatment periods found for calendar type")
+            _dh_error_estimation("aggte", "no post-treatment periods found for calendar type")
         }
         raw_vals = J(n_raw, 1, .)
         j = 0
@@ -1600,7 +1618,7 @@ real colvector _didhetero_aggte_build_eval(
         default_eval = _didhetero_unique_sorted(raw_vals)
     }
     else {
-        _error(3498, "invalid aggregation type: " + type)
+        _dh_error_estimation("aggte", "invalid aggregation type: " + type)
     }
 
     // User override or return default
@@ -1610,7 +1628,7 @@ real colvector _didhetero_aggte_build_eval(
     }
 
     if (type == "simple") {
-        _error(198, "aggte_gt: eval() is not allowed when type(simple)")
+        _dh_error_input("aggte", "eval() is not allowed when type(simple)")
     }
 
     // =====================================================================
@@ -1633,7 +1651,7 @@ real colvector _didhetero_aggte_build_eval(
                 printf("%g ", default_eval[j])
             }
             printf("\n")
-            _error(198, "aggte_gt: invalid eval value specified")
+            _dh_error_input("aggte", "invalid eval value specified")
         }
     }
 
@@ -1869,7 +1887,7 @@ struct AggtResult scalar didhetero_aggte_main(
                         h_agg_vec[id_eval] = bw_manual[id_eval]
                     }
                     else {
-                        _error(3001, "aggte manual bw: length(bw) must be 1 or num_eval (short-circuit)")
+                        _dh_error_dimension("aggte", "manual bw: length(bw) must be 1 or num_eval (short-circuit)")
                     }
                 }
                 else {
@@ -2337,22 +2355,22 @@ void _didhetero_aggte_ado_entry(
         __err++
     }
     if (__err > 0) {
-        _error(198, sprintf("aggte_gt: %g dimension mismatch(es) detected", __err))
+        _dh_error_input("aggte", sprintf("%g dimension mismatch(es) detected", __err))
     }
 
     // Persisted Pass 2 inputs must be available for re-estimation
     if (rows(Y_wide_mat) != n) {
-        _error(198, sprintf("aggte_gt: e(dh_Y_wide) rows=%g, expected n=%g", rows(Y_wide_mat), n))
+        _dh_error_input("aggte", sprintf("e(dh_Y_wide) rows=%g, expected n=%g", rows(Y_wide_mat), n))
     }
     if (rows(G_unit_mat) != n & cols(G_unit_mat) != n) {
-        _error(198, sprintf("aggte_gt: e(dh_G_unit) length mismatch, expected n=%g", n))
+        _dh_error_input("aggte", sprintf("e(dh_G_unit) length mismatch, expected n=%g", n))
     }
     t_vals_vec = (cols(t_vals_mat) == 1) ? t_vals_mat : t_vals_mat'
     if (cols(Y_wide_mat) != rows(t_vals_vec)) {
-        _error(198, "aggte_gt: e(dh_t_vals) length must equal number of columns in e(dh_Y_wide)")
+        _dh_error_input("aggte", "e(dh_t_vals) length must equal number of columns in e(dh_Y_wide)")
     }
     if (rows(gps_mat) == 0 | rows(or_mat) == 0) {
-        _error(198, "aggte_gt: persisted Pass 2 inputs are incomplete; please re-run catt_gt or didhetero")
+        _dh_error_input("aggte", "persisted Pass 2 inputs are incomplete; please re-run catt_gt or didhetero")
     }
 
     // Convert B_g_t from flat to pointer array
@@ -2362,11 +2380,11 @@ void _didhetero_aggte_ado_entry(
     real scalar __k
     for (__k = 1; __k <= num_gteval; __k++) {
         if (B_g_t[__k] == NULL) {
-            _error(198, sprintf("aggte_gt: B_g_t[%g] is NULL after unflatten", __k))
+            _dh_error_input("aggte", sprintf("B_g_t[%g] is NULL after unflatten", __k))
         }
         if (rows(*B_g_t[__k]) != n | cols(*B_g_t[__k]) != num_zeval) {
             printf("{err}aggte_gt: B_g_t[%g] is %gx%g, expected %gx%g\n", __k, rows(*B_g_t[__k]), cols(*B_g_t[__k]), n, num_zeval)
-            _error(198, "aggte_gt: B_g_t unflatten dimension error")
+            _dh_error_input("aggte", "B_g_t unflatten dimension error")
         }
     }
 

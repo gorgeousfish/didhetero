@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.1.0}{...}
+{* *! version 1.0.0  20260701}{...}
 {viewerjumpto "Syntax" "aggte_gt##syntax"}{...}
 {viewerjumpto "Description" "aggte_gt##description"}{...}
 {viewerjumpto "Options" "aggte_gt##options"}{...}
@@ -36,6 +36,7 @@
 {synopt:{opt bw(numlist)}}manual bandwidth; requires {cmd:bwselect(manual)}{p_end}
 
 {syntab:Inference}
+{synopt:{opt level(#)}}confidence level; default is inherited from upstream or {cmd:c(level)}{p_end}
 {synopt:{opt bstrap(true|false)}}multiplier bootstrap toggle; default is {cmd:true}{p_end}
 {synopt:{opt biters(#)}}bootstrap iterations; default is {cmd:1000}{p_end}
 {synopt:{opt seed(#)}}RNG seed for bootstrap reproducibility; default is {cmd:-1} (current RNG state){p_end}
@@ -81,9 +82,9 @@ computed for each eval point, then the CATT surface is re-smoothed at
 those bandwidths before the weighted average is taken. The kernel
 function and significance level are inherited from the upstream
 {helpb catt_gt}/{helpb didhetero} result to match the closed algorithm
-path described in the paper. To change the kernel or the significance
-level, set {opt kernel()} or {opt alp()} when running the upstream
-estimator.
+path described in the paper. To change the confidence level, use
+{opt level()} in {cmd:aggte_gt} directly or set {opt level()}
+when running the upstream estimator.
 
 
 {marker options}{...}
@@ -251,7 +252,8 @@ same information), the upstream {helpb catt_gt}/{helpb didhetero} snapshot
 {synopt:{cmd:e(num_gteval)}}number of (g,t) pairs evaluated by the upstream result{p_end}
 {synopt:{cmd:e(num_zeval)}}number of z evaluation points in the upstream result{p_end}
 {synopt:{cmd:e(porder)}}aggregation polynomial order{p_end}
-{synopt:{cmd:e(alp)}}significance level (inherited from the upstream result){p_end}
+{synopt:{cmd:e(alp)}}significance level{p_end}
+{synopt:{cmd:e(level)}}confidence level (= 100*(1-alp)){p_end}
 {synopt:{cmd:e(bstrap)}}1 if bootstrap was performed during the current aggregation, 0 otherwise{p_end}
 {synopt:{cmd:e(biters)}}effective bootstrap iterations; 0 if bootstrap is disabled{p_end}
 {synopt:{cmd:e(seed_request)}}requested bootstrap seed; {cmd:-1} means use the current RNG state{p_end}

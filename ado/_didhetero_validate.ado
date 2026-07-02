@@ -22,7 +22,11 @@ program define _didhetero_validate
         [UNIFormall]                                 ///
         [PREtrend]                                   ///
         [BWselect(string)]                           ///
-        [BW(numlist)]
+        [BW(numlist)]                                  ///
+        [KDETrim]                                      ///
+        [GPSTrim(numlist)]                               ///
+        [RBC]                                              ///
+        [UNDERSmooth]
 
     local depvar `varlist'
 
@@ -84,6 +88,49 @@ program define _didhetero_validate
     local bstrap_flag = ("`bstrap'" != "")
     local uniformall_flag = ("`uniformall'" != "")
     local pretrend_flag = ("`pretrend'" != "")
+    local kdetrim_flag = ("`kdetrim'" != "")
+
+    // RBC option conflict checks
+    local rbc_flag = ("`rbc'" != "")
+    local undersmooth_flag = ("`undersmooth'" != "")
+    if `rbc_flag' {
+        if "`bw'" != "" {
+            di as error "rbc option cannot be combined with manual bandwidth bw()"
+            exit 198
+        }
+        if "`bwselect'" == "manual" {
+            di as error "rbc option cannot be combined with bwselect(manual)"
+            exit 198
+        }
+    }
+
+    // GPS trimming validation
+    local gpstrim_lo = 0
+    local gpstrim_hi = 1
+    if "`gpstrim'" != "" {
+        local n_gpstrim_tokens : word count `gpstrim'
+        if `n_gpstrim_tokens' != 2 {
+            di as error "gpstrim() must contain exactly 2 values: gpstrim(lower upper)"
+            exit 198
+        }
+        local gpstrim_lo : word 1 of `gpstrim'
+        local gpstrim_hi : word 2 of `gpstrim'
+        if `gpstrim_lo' <= 0 | `gpstrim_lo' >= 1 {
+            di as error "gpstrim() lower bound must be strictly between 0 and 1"
+            exit 198
+        }
+        if `gpstrim_hi' <= 0 | `gpstrim_hi' >= 1 {
+            di as error "gpstrim() upper bound must be strictly between 0 and 1"
+            exit 198
+        }
+        if `gpstrim_lo' >= `gpstrim_hi' {
+            di as error "gpstrim() lower bound must be strictly less than upper bound"
+            exit 198
+        }
+        if `gpstrim_lo' > 0.1 {
+            di as text "Warning: gpstrim() lower bound (`gpstrim_lo') is large (>0.1); many observations may be trimmed"
+        }
+    }
 
     // pretrend only affects the automatically constructed (g,t) domain.
     // Explicit gteval() already fixes that domain, so the combination is invalid.
@@ -303,14 +350,38 @@ program define _didhetero_validate
         exit 198
     }
 
-    // Balanced panel check
-    tempvar T_i
-    quietly bysort `id': gen long `T_i' = _N
-    quietly summarize `T_i', meanonly
-    if r(min) != r(max) {
-        di as error ///
-            "Panel is not balanced: each id must have the same number of time periods"
-        exit 198
+    // =========================================================================
+    // Panel balance check (Assumption 2.2: balanced panel required)
+    // =========================================================================
+    tempvar _obs_per_id
+    quietly bysort `id': gen `_obs_per_id' = _N
+    quietly summarize `_obs_per_id'
+    local _max_obs = r(max)
+    local _min_obs = r(min)
+    if `_max_obs' != `_min_obs' {
+        // Unbalanced panel detected
+        tempvar _is_unbal
+        quietly gen `_is_unbal' = (`_obs_per_id' != `_max_obs')
+        quietly count if `_is_unbal'
+        local _n_unbal = r(N)
+        // Get list of unbalanced IDs (show first 10)
+        di as error "Panel is unbalanced: expected `_max_obs' observations per unit"
+        di as error "`_n_unbal' observations belong to units with fewer periods"
+        quietly levelsof `id' if `_is_unbal', local(_unbal_ids)
+        local _n_ids: word count `_unbal_ids'
+        if `_n_ids' <= 10 {
+            di as error "Unbalanced unit IDs: `_unbal_ids'"
+        }
+        else {
+            local _first10 ""
+            forvalues _j = 1/10 {
+                local _first10 "`_first10' `: word `_j' of `_unbal_ids''"                
+            }
+            di as error "First 10 unbalanced unit IDs: `_first10' ..."
+            di as error "(Total `_n_ids' unbalanced units)"
+        }
+        di as error "didhetero requires a balanced panel. Please balance your data before estimation."
+        exit 459
     }
 
     // Every id must share the same sorted time support
@@ -335,13 +406,40 @@ program define _didhetero_validate
         exit 198
     }
 
-    // z must be time-invariant within id
-    tempvar z_sd
-    quietly bysort `id': egen double `z_sd' = sd(`z')
-    quietly summarize `z_sd', meanonly
-    if r(max) > 1e-8 {
-        di as error "z variable is not time-invariant within id"
-        exit 198
+    // =========================================================================
+    // Z time-invariance check
+    // The conditioning variable Z must be time-invariant within each unit
+    // (paper defines CATT(g,t|z) conditional on a fixed characteristic Z=z)
+    // =========================================================================
+    tempvar _z_sd
+    quietly bysort `id': egen `_z_sd' = sd(`z')
+    quietly count if `_z_sd' > 0 & `_z_sd' < .
+    local _n_varying = r(N)
+    if `_n_varying' > 0 {
+        // Z varies within at least one unit
+        tempvar _z_varies
+        quietly gen `_z_varies' = (`_z_sd' > 0 & `_z_sd' < .)
+        quietly egen _tag_varies = tag(`id') if `_z_varies'
+        quietly count if _tag_varies == 1
+        local _n_units_vary = r(N)
+        di as error "Z variable (`z') is not time-invariant within units"
+        di as error "`_n_units_vary' unit(s) have time-varying Z values"
+        // Show first few problematic IDs
+        quietly levelsof `id' if _tag_varies == 1, local(_vary_ids)
+        local _n_vids: word count `_vary_ids'
+        if `_n_vids' <= 5 {
+            di as error "Units with varying Z: `_vary_ids'"
+        }
+        else {
+            local _first5 ""
+            forvalues _j = 1/5 {
+                local _first5 "`_first5' `: word `_j' of `_vary_ids''"                
+            }
+            di as error "First 5 units with varying Z: `_first5' ..."
+        }
+        capture drop _tag_varies
+        di as error "didhetero requires Z to be time-invariant. Consider using the first-period value."
+        exit 459
     }
 
     // xformula variables must be time-invariant within id
@@ -440,6 +538,10 @@ program define _didhetero_validate
     c_local _dh_pretrend  `pretrend_flag'
     c_local _dh_bwselect  `bwselect'
     c_local _dh_bw        `bw'
+    c_local _dh_kdetrim   `kdetrim_flag'
+    c_local _dh_gpstrim   `gpstrim_lo' `gpstrim_hi'
+    c_local _dh_rbc       `rbc_flag'
+    c_local _dh_undersmooth `undersmooth_flag'
     c_local _dh_n         `n_total'
 
 end

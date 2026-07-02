@@ -1,27 +1,24 @@
 mata:
 
 // =============================================================================
-// Second and Third Stage Estimation: Influence Function Construction
+// didhetero_stage23.mata
+// Second and Third Stage: Influence function construction and DR estimation
 //
-// This module implements the doubly robust estimation pipeline for conditional
-// average treatment effects on the treated (CATT). The estimation proceeds
-// in two phases:
+// Provides:
+//   - _didhetero_construct_A()  // Construct DR core term A_{i,g,t}(z_r)
+//   - _didhetero_construct_B()  // Construct influence function B_{i,g,t}(z_r)
+//   - didhetero_stage23()       // Main Stage 2-3 estimation orchestrator
 //
-// Phase I (via didhetero_catt_core()):
-//   - Construct intermediate variables
-//   - Estimate nuisance parameters mu_E, mu_F via local linear regression
-//   - Estimate conditional expectations mu_G, mu_R via local polynomial regression
-//   - Construct A_{i,g,t}(z_r) and B_{i,g,t}(z_r) influence functions
-//   - Compute DR point estimates via local polynomial regression on A
+// Requires:
+//   - didhetero_types.mata              (DidHeteroData struct)
+//   - didhetero_lpr.mata                (didhetero_lpr)
+//   - didhetero_se.mata                 (didhetero_se_analytical_ucb)
+//   - didhetero_bootstrap_unified.mata  (didhetero_bootstrap_ucb)
+//   - didhetero_catt_core.mata          (didhetero_catt_core)
+//   - didhetero_intermediate.mata       (didhetero_intermediate_vars)
+//   - didhetero_bwselect_lp.mata        (_didhetero_lpbwselect_mse)
 //
-// Phase II (local computation):
-//   - Standard error and analytical uniform confidence bands
-//   - Bootstrap uniform confidence bands
-//
-// Functions:
-//   - _didhetero_construct_A(): Construct DR core term A_{i,g,t}(z_r)
-//   - _didhetero_construct_B(): Construct influence function B_{i,g,t}(z_r)
-//   - didhetero_stage23(): Main estimation orchestrator
+// Paper reference: Eq. 3.1-3.5, doubly robust influence function construction
 // =============================================================================
 
 
@@ -167,6 +164,10 @@ real matrix didhetero_stage23(
     real scalar has_kd0_Z
     real scalar r_pos, n_pos_missing, eps_pos
     struct DidHeteroCattResult scalar catt_result
+    real scalar _profile_flag
+
+    // --- Read profile flag ---
+    _profile_flag = (st_local("_dh_profile") == "1")
 
     // --- Dimensions ---
     n = data.n
@@ -180,8 +181,10 @@ real matrix didhetero_stage23(
     // to the reentrant core function. Bandwidth is pre-resolved, hence
     // bwselect="manual" is specified.
     // =====================================================================
+    if (_profile_flag) timer_on(3)
     catt_result = didhetero_catt_core(data, gps_mat, or_mat,
                       data.gteval, bw, "manual", data.porder, data.kernel)
+    if (_profile_flag) timer_off(3)
 
     // --- Copy core results into data struct ---
     data.A_g_t = catt_result.A_g_t
@@ -207,6 +210,7 @@ real matrix didhetero_stage23(
     // Loop over group-time pairs using B_g_t and estimates from core results.
     // Computed only when kd0_Z is available from Stage 1.
     // =====================================================================
+    if (_profile_flag) timer_on(4)
     for (id_gt = 1; id_gt <= K; id_gt++) {
         if (has_kd0_Z) {
             h_gt = bw[id_gt]
@@ -259,6 +263,7 @@ real matrix didhetero_stage23(
             }
         }
     }
+    if (_profile_flag) timer_off(4)
 
     // =================================================================
     // Bootstrap uniform confidence bands
@@ -266,22 +271,25 @@ real matrix didhetero_stage23(
     // confidence bands via weighted bootstrap. Otherwise, set CI2 fields
     // to missing values.
     // =================================================================
+    if (_profile_flag) timer_on(5)
     if (data.biters > 0) {
         if (seed >= 0 & seed < .) {
             rseed(seed)
         }
 
-        didhetero_boot_ucb_optimized(
+        didhetero_bootstrap_ucb(
             data.A_g_t, est, data.se, bw, data.Z, data.zeval,
             n, data.porder, data.kernel, data.alp, data.biters,
             data.uniformall, K, num_zeval,
-            data.ci2_lower, data.ci2_upper, data.c_check_bs)
+            data.ci2_lower, data.ci2_upper, data.c_check_bs,
+            100, data.verbose)
     }
     else {
         data.ci2_lower = J(num_zeval, K, .)
         data.ci2_upper = J(num_zeval, K, .)
         data.c_check_bs = J(K, 1, .)
     }
+    if (_profile_flag) timer_off(5)
 
     return(est)
 }

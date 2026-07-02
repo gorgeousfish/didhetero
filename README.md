@@ -4,7 +4,7 @@
 
 [![Stata 16+](https://img.shields.io/badge/Stata-16%2B-blue.svg)](https://www.stata.com/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-green.svg)]()
+[![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-green.svg)]()
 
 ![didhetero](image/image.png)
 
@@ -112,7 +112,8 @@ help didhetero
 ```stata
 * Load the bundled minimum wage dataset
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Estimate CATT at three poverty-rate values for instantaneous effects
 catt_gt lemp, group(G) time(period) id(id) z(Z) ///
@@ -230,7 +231,8 @@ catt_gt Y, ... z(Z) zeval(...) xformula("Z*X1")
 ```stata
 * Load the bundled minimum wage dataset (installed with the package)
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Required variables in your own data:
 *   Y      — outcome variable
@@ -342,7 +344,8 @@ The bundled `min_wage_cs.dta` dataset reproduces the empirical application in Im
 ```stata
 * Standard data loading and variable renaming used in all examples below
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 ```
 
 ### Mandatory Seat Belt Laws (`seatbelt.dta`)
@@ -411,7 +414,8 @@ set more off
 
 * Load and prepare data
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Examine treatment groups and time periods
 tab G
@@ -442,7 +446,8 @@ clear all
 set more off
 
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Step 1: Estimate CATT for all required (g,t) pairs
 * aggte_gt reads from stored catt_gt results, so gteval must include every
@@ -480,7 +485,8 @@ clear all
 set more off
 
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Estimate CATT once with all (g,t) pairs needed by all four aggregation types.
 * aggte_gt can be called multiple times after one catt_gt — it reads from e().
@@ -521,7 +527,8 @@ clear all
 set more off
 
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * The pretrend option automatically includes all pre-treatment periods t < g
 * for each cohort. It cannot be combined with gteval(); omit gteval() here
@@ -551,7 +558,8 @@ clear all
 set more off
 
 use min_wage_cs.dta, clear
-rename (first_treat year countyreal pov) (G period id Z)
+rename (first_treat year countyreal) (G period id)
+bysort id (period): gen Z = pov[1]
 
 * Estimate with multiplier bootstrap (500 iterations for speed; use 1000 for publication)
 * Include all (g,t) pairs required for dynamic aggregation at e=0,1,2

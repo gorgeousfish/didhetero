@@ -1,16 +1,18 @@
 mata:
 
 // =============================================================================
+// didhetero_se.mata
 // Standard error estimation and analytical uniform confidence bands
 //
-// Implements the 4-step variance estimation pipeline for each evaluation
-// point z_r:
-//   Step 1: Bandwidth selection for conditional mean of influence function
-//   Step 2: Local polynomial regression of influence function on covariate
-//   Step 3: Residuals used to estimate conditional variance
-//   Step 4: Variance assembly and standard error computation
+// Provides:
+//   - didhetero_analytical_crit()    // Extreme value critical value for UCB
+//   - didhetero_se_analytical_ucb()  // SE + analytical UCB for one (g,t) pair
 //
-// Analytical uniform confidence bands computed via extreme value approximation.
+// Requires:
+//   - didhetero_lpr.mata            (didhetero_lpr)
+//   - didhetero_bwselect_lp.mata    (_didhetero_lpbwselect_imse, _didhetero_lpbwselect_mse)
+//
+// Paper reference: Theorem 2 (extreme value approximation), Section 3.1.3
 // =============================================================================
 
 
@@ -49,12 +51,23 @@ real scalar didhetero_analytical_crit(
     // Compute a^2 term
     a_sq = 2 * log((b_val - a_val) / bw_gt) + 2 * log(sqrt(lambda) / (2 * c("pi")))
 
+    // Guard: a_sq must be positive for extreme value approximation to hold
+    // Theory requires (b-a)/h -> infinity; when a_sq <= 0, the evaluation
+    // region is too small relative to bandwidth for the Gumbel approximation.
+    if (a_sq <= 0) {
+        printf("{txt}Note: analytical UCB not applicable — evaluation region " +
+               "too narrow relative to bandwidth\n")
+        printf("{txt}  (a_sq = %9.4f; need (b-a)/h >> 2*pi/sqrt(lambda) " +
+               "for extreme value approximation)\n", a_sq)
+        return(.)
+    }
+
     // Guard: valid significance level
     if (alp <= 0 | alp >= 1) return(.)
     inner = log(1 / sqrt(1 - alp))
 
     if (inner <= 0) {
-        printf("Warning: log(1/sqrt(1-alp)) <= 0, invalid alp\n")
+        printf("{txt}Warning: log(1/sqrt(1-alp)) <= 0, invalid alp\n")
         return(.)
     }
 
@@ -62,7 +75,10 @@ real scalar didhetero_analytical_crit(
     arg = a_sq - 2 * log_inner
 
     if (arg <= 0) {
-        printf("Warning: argument to square root non-positive\n")
+        printf("{txt}Note: analytical UCB not applicable — sqrt argument " +
+               "non-positive (a_sq=%9.4f, 2*log_inner=%9.4f)\n", a_sq, 2*log_inner)
+        printf("{txt}  (evaluation region too narrow relative to bandwidth " +
+               "for Gumbel approximation)\n")
         return(.)
     }
 
@@ -132,9 +148,7 @@ void didhetero_se_analytical_ucb(
 {
     real scalar R, r, mu_B_bw, sigma2_bw_scalar, sigma2, V_hat_r
     real scalar n_missing, est_scale
-    real scalar _abs_n
     real colvector B_r, mu_B_hat, U_hat, sigma2_bw_vec
-    real colvector _abs_est
 
     R = rows(zeval)
 
@@ -191,11 +205,12 @@ void didhetero_se_analytical_ucb(
         if (sigma2 < 0) sigma2 = 0
 
         // Assemble variance estimate
-        if (kd0_Z[r] > 0) {
-            V_hat_r = const_V * sigma2 / kd0_Z[r]
+        if (kd0_Z[r] >= . | kd0_Z[r] <= 0) {
+            // Density is missing (trimmed) or non-positive: variance undefined
+            V_hat_r = .
         }
         else {
-            V_hat_r = .
+            V_hat_r = const_V * sigma2 / kd0_Z[r]
         }
 
         // Store variance estimate
@@ -208,24 +223,13 @@ void didhetero_se_analytical_ucb(
         }
         else if (V_hat_r != . & V_hat_r >= 0) {
             se_gt[r] = sqrt(V_hat_r / (n * bw_gt))
-            // Scale-invariant guard against pathologically large SEs.
-            // median() is not available in base Mata; compute the
-            // median of |est_gt| (with missing handling) via sort.
-            _abs_est = select(abs(est_gt), abs(est_gt) :< .)
-            _abs_n   = rows(_abs_est)
-            if (_abs_n == 0) {
-                est_scale = 1
-            }
-            else {
-                _sort(_abs_est, 1)
-                if (mod(_abs_n, 2) == 1) {
-                    est_scale = _abs_est[(_abs_n + 1) / 2] + 1
-                }
-                else {
-                    est_scale =
-                        (_abs_est[_abs_n / 2]
-                         + _abs_est[_abs_n / 2 + 1]) / 2 + 1
-                }
+            // Scale-invariant guard against pathologically large SEs
+            {
+                real colvector _abs_sorted
+                real scalar _n_est
+                _abs_sorted = sort(select(abs(est_gt), abs(est_gt) :< .), 1)
+                _n_est = rows(_abs_sorted)
+                est_scale = (_n_est > 0 ? _abs_sorted[ceil(_n_est/2)] : 0) + 1
             }
             if (se_gt[r] > 1e3 * est_scale) {
                 se_gt[r] = .
@@ -241,12 +245,18 @@ void didhetero_se_analytical_ucb(
 
     // Handle invalid critical value
     if (c_hat_gt == .) {
-        printf("{txt}Warning: analytical UCB critical value cannot be computed; leaving analytical CI missing\n")
+        printf("{txt}Warning: analytical UCB critical value cannot be computed;" +
+               " analytical CI set to missing.\n")
+        printf("{txt}  Suggestion: use bootstrap uniform confidence bands" +
+               " (bstrap option) instead.\n")
+        ci1_l_gt = J(R, 1, .)
+        ci1_u_gt = J(R, 1, .)
     }
-
-    // Construct uniform confidence bands
-    ci1_l_gt = est_gt - c_hat_gt * se_gt
-    ci1_u_gt = est_gt + c_hat_gt * se_gt
+    else {
+        // Construct uniform confidence bands
+        ci1_l_gt = est_gt - c_hat_gt * se_gt
+        ci1_u_gt = est_gt + c_hat_gt * se_gt
+    }
 
     // Report missing standard errors
     n_missing = sum(se_gt :== .)

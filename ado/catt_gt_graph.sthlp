@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.1.0}{...}
+{* *! version 1.0.0  20260701}{...}
 {viewerjumpto "Syntax" "catt_gt_graph##syntax"}{...}
 {viewerjumpto "Description" "catt_gt_graph##description"}{...}
 {viewerjumpto "Options" "catt_gt_graph##options"}{...}

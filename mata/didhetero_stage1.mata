@@ -1,11 +1,23 @@
 mata:
 
 // =============================================================================
+// didhetero_stage1.mata
 // Stage 1 dispatch: parametric estimation (GPS + OR) + KDE
 //
-// Functions:
-//   1. didhetero_parametric_func()   - Unified GPS + OR estimation entry point
-//   2. didhetero_stage1_dispatch()   - Full Stage 1 dispatch
+// Provides:
+//   - didhetero_parametric_func()  // Unified GPS + OR estimation entry point
+//   - didhetero_stage1_dispatch()  // Full Stage 1 pipeline dispatch
+//
+// Requires:
+//   - didhetero_types.mata         (DidHeteroData, DidHeteroParamResults,
+//                                   DidHeteroStage1Results)
+//   - didhetero_gps.mata           (didhetero_gps_estimate)
+//   - didhetero_or.mata            (didhetero_or_estimate)
+//   - didhetero_kde.mata           (didhetero_kde_density, didhetero_kde_deriv)
+//   - didhetero_utils_init.mata    (didhetero_gen_z_supp,
+//                                   didhetero_init_param_results)
+//
+// Paper reference: Section 2.3-2.4, parametric first stage
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -99,12 +111,43 @@ struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
 
     // Step 4: Kernel density estimation kd0_Z using Epanechnikov kernel
     kd0_Z = didhetero_kde_density(Z, zeval)
-    // Positive value protection: truncate non-positive to 1e-12
-    for (r = 1; r <= rows(kd0_Z); r++) {
-        if (kd0_Z[r] <= 0) {
-            printf("{txt}Warning: density estimate non-positive at z=%g, truncated to 1e-12\n", zeval[r])
-            kd0_Z[r] = 1e-12
+    // Data-driven density truncation with optional trim logic
+    // Replaces hardcoded 1e-12 with max(density) * 1e-6 (paper Assumption 3.1)
+    {
+        real scalar _kde_trunc_count, _kde_max_density, _kde_threshold
+        real colvector _kde_trimmed_vec
+
+        _kde_max_density = max(kd0_Z)
+        // Fallback: if all density values are non-positive, use 1e-12
+        if (_kde_max_density <= 0 | _kde_max_density >= .) {
+            _kde_threshold = 1e-12
         }
+        else {
+            _kde_threshold = _kde_max_density * 1e-6
+        }
+
+        _kde_trunc_count = 0
+        _kde_trimmed_vec = J(rows(kd0_Z), 1, 0)
+
+        for (r = 1; r <= rows(kd0_Z); r++) {
+            if (kd0_Z[r] <= 0 | kd0_Z[r] < _kde_threshold) {
+                _kde_trimmed_vec[r] = 1
+                kd0_Z[r] = _kde_threshold
+                _kde_trunc_count++
+            }
+        }
+        if (_kde_trunc_count > 0) {
+            printf("{txt}Note: %g of %g density evaluation points (%.1f%s) below threshold (%.2e)\n",
+                _kde_trunc_count, rows(kd0_Z), 100 * _kde_trunc_count / rows(kd0_Z), "%", _kde_threshold)
+            printf("{txt}      Low-density z-values:")
+            for (r = 1; r <= rows(kd0_Z); r++) {
+                if (_kde_trimmed_vec[r] == 1) printf(" %.4g", zeval[r])
+            }
+            printf("\n")
+            printf("{txt}      These points may have unreliable variance estimates (1/f_Z inflation)\n")
+        }
+
+        results.kde_trimmed = _kde_trimmed_vec
     }
 
     // Step 5: Density derivative estimation kd1_Z using local polynomial (p=3, v=2)

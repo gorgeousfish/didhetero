@@ -95,6 +95,14 @@ if _rc {
     exit _rc
 }
 
+// Unified error codes and message utilities
+display as text "  Compiling: mata/didhetero_errors.mata"
+capture noisily do "mata/didhetero_errors.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_errors.mata (rc = " _rc ")"
+    exit _rc
+}
+
 // Kernel weight computation
 display as text "  Compiling: mata/didhetero_kernel.mata"
 capture noisily do "mata/didhetero_kernel.mata"
@@ -103,11 +111,32 @@ if _rc {
     exit _rc
 }
 
-// Utility functions
-display as text "  Compiling: mata/didhetero_utils.mata"
-capture noisily do "mata/didhetero_utils.mata"
+// Utility functions (split into functional submodules)
+display as text "  Compiling: mata/didhetero_utils_formula.mata"
+capture noisily do "mata/didhetero_utils_formula.mata"
 if _rc {
-    display as error "ERROR: Failed to compile didhetero_utils.mata (rc = " _rc ")"
+    display as error "ERROR: Failed to compile didhetero_utils_formula.mata (rc = " _rc ")"
+    exit _rc
+}
+
+display as text "  Compiling: mata/didhetero_utils_numerical.mata"
+capture noisily do "mata/didhetero_utils_numerical.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_utils_numerical.mata (rc = " _rc ")"
+    exit _rc
+}
+
+display as text "  Compiling: mata/didhetero_utils_domain.mata"
+capture noisily do "mata/didhetero_utils_domain.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_utils_domain.mata (rc = " _rc ")"
+    exit _rc
+}
+
+display as text "  Compiling: mata/didhetero_utils_init.mata"
+capture noisily do "mata/didhetero_utils_init.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_utils_init.mata (rc = " _rc ")"
     exit _rc
 }
 
@@ -119,11 +148,19 @@ if _rc {
     exit _rc
 }
 
-// Bandwidth selection
-display as text "  Compiling: mata/didhetero_bwselect.mata"
-capture noisily do "mata/didhetero_bwselect.mata"
+// Bandwidth selection — LP regression
+display as text "  Compiling: mata/didhetero_bwselect_lp.mata"
+capture noisily do "mata/didhetero_bwselect_lp.mata"
 if _rc {
-    display as error "ERROR: Failed to compile didhetero_bwselect.mata (rc = " _rc ")"
+    display as error "ERROR: Failed to compile didhetero_bwselect_lp.mata (rc = " _rc ")"
+    exit _rc
+}
+
+// Bandwidth selection — kernel density
+display as text "  Compiling: mata/didhetero_bwselect_kde.mata"
+capture noisily do "mata/didhetero_bwselect_kde.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_bwselect_kde.mata (rc = " _rc ")"
     exit _rc
 }
 
@@ -132,6 +169,14 @@ display as text "  Compiling: mata/didhetero_kde.mata"
 capture noisily do "mata/didhetero_kde.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_kde.mata (rc = " _rc ")"
+    exit _rc
+}
+
+// Bandwidth selection — local polynomial density estimation
+display as text "  Compiling: mata/didhetero_bwselect_lpdensity.mata"
+capture noisily do "mata/didhetero_bwselect_lpdensity.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_bwselect_lpdensity.mata (rc = " _rc ")"
     exit _rc
 }
 
@@ -191,24 +236,38 @@ if _rc {
     exit _rc
 }
 
-// Bootstrap uniform confidence band
-display as text "  Compiling: mata/didhetero_bootstrap.mata"
+// Bootstrap engine — infrastructure primitives (must precede unified)
+display as text "  Compiling: mata/didhetero_bootstrap_engine.mata"
+capture noisily do "mata/didhetero_bootstrap_engine.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_bootstrap_engine.mata (rc = " _rc ")"
+    exit _rc
+}
+
+// Bootstrap unified module — application layer (depends on engine)
+display as text "  Compiling: mata/didhetero_bootstrap_unified.mata"
+capture noisily do "mata/didhetero_bootstrap_unified.mata"
+if _rc {
+    display as error "ERROR: Failed to compile didhetero_bootstrap_unified.mata (rc = " _rc ")"
+    exit _rc
+}
+
+// Legacy placeholders (consolidated into didhetero_bootstrap_unified.mata)
+display as text "  Compiling: mata/didhetero_bootstrap.mata (placeholder)"
 capture noisily do "mata/didhetero_bootstrap.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_bootstrap.mata (rc = " _rc ")"
     exit _rc
 }
 
-// Bootstrap weight generation
-display as text "  Compiling: mata/didhetero_boot.mata"
+display as text "  Compiling: mata/didhetero_boot.mata (placeholder)"
 capture noisily do "mata/didhetero_boot.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_boot.mata (rc = " _rc ")"
     exit _rc
 }
 
-// Bootstrap optimization
-display as text "  Compiling: mata/didhetero_bootstrap_opt.mata"
+display as text "  Compiling: mata/didhetero_bootstrap_opt.mata (placeholder)"
 capture noisily do "mata/didhetero_bootstrap_opt.mata"
 if _rc {
     display as error "ERROR: Failed to compile didhetero_bootstrap_opt.mata (rc = " _rc ")"

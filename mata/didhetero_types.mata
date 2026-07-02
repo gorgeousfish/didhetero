@@ -1,18 +1,25 @@
 mata:
 
 // =============================================================================
-// Mata struct definitions for heterogeneous treatment effect estimation
+// didhetero_types.mata
+// Core type definitions (structs) for heterogeneous treatment effect estimation
 //
-// Data structures:
-//   1. DidHeteroData           - Panel data container for estimation
-//   2. DidHeteroParamResults   - Parametric estimation results (GPS + OR)
-//   3. DidHeteroStage1Results  - Full Stage 1 results (parametric + KDE)
-//   4. DidHeteroKernelConsts   - Precomputed kernel integral constants
-//   5. BootPrecomp             - Bootstrap pre-computed invariants
-//   6. DidHeteroEstResult      - Single (g,t) pair estimation result
-//   7. DidHeteroAggteResult    - Aggregated parameter estimation result
-//   8. DidHeteroCattResult     - Reentrant CATT estimator return structure
-//   9. AggtResult              - aggte_gt command output (all eval points)
+// Provides:
+//   - DidHeteroData            // Panel data container and estimation state
+//   - DidHeteroParamResults    // Parametric estimation results (GPS + OR)
+//   - DidHeteroStage1Results   // Full Stage 1 results (parametric + KDE)
+//   - DidHeteroKernelConsts    // Precomputed kernel integral constants
+//   - BootPrecomp              // Bootstrap pre-computed invariants
+//   - DidHeteroEstResult       // Single (g,t) pair estimation result
+//   - DidHeteroAggteResult     // Aggregated parameter estimation result
+//   - DidHeteroCattResult      // Reentrant CATT estimator return structure
+//   - AggtResult               // aggte_gt command output (all eval points)
+//   - didhetero_version()      // Package version string
+//
+// Requires:
+//   - (none — base definitions, must be compiled first)
+//
+// Paper reference: Sections 2–4, Imai, Qin, and Yanagi (2025)
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -79,7 +86,8 @@ struct DidHeteroData {
     // === Compatibility fields retained for option/data plumbing ===
     string scalar  base_period      // "universal" or "varying"
     string scalar  true_base_period // stored copy of base_period
-    real scalar    print_details    // 1 = print per-(g,t) status, 0 = quiet
+    real scalar    verbose          // 0=quiet (default), 1=verbose diagnostics
+    real scalar    gps_strict       // 0=soft failure (default), 1=error on GPS non-convergence
     real scalar    deriv            // derivative order for LPR (default 0)
     real scalar    panel            // 1 = panel data, 0 = repeated cross-section
     string scalar  est_method       // estimation method identifier
@@ -105,6 +113,8 @@ struct DidHeteroData {
 
     // === Stage 1 density estimates ===
     real colvector kd0_Z        // num_zeval x 1, kernel density estimates
+    real colvector kde_trimmed  // num_zeval x 1, indicator: 1 = density below threshold (trimmed)
+    real scalar    kde_trim     // 0 = no trim (default), 1 = trim low-density points
 
     // === Standard errors and analytical uniform confidence bands ===
     real matrix    se           // num_zeval x num_gteval, standard errors
@@ -117,6 +127,23 @@ struct DidHeteroData {
     real matrix    ci2_lower    // num_zeval x num_gteval, bootstrap UCB lower bound
     real matrix    ci2_upper    // num_zeval x num_gteval, bootstrap UCB upper bound
     real colvector c_check_bs   // num_gteval x 1, bootstrap critical values
+
+    // === GPS diagnostics ===
+    real matrix    gps_diagnostics    // K x 6 diagnostics matrix
+    // Columns: [converged, iterations, max_gradient, ll_final, n_extreme, cond_number]
+    // K = num_gteval (notyettreated) or num_geval (nevertreated)
+
+    // === GPS trimming parameters ===
+    real scalar    gps_trim_lo      // lower bound for GPS trimming (default 0, no trim)
+    real scalar    gps_trim_hi      // upper bound for GPS trimming (default 1, no trim)
+    real scalar    gps_n_trimmed    // total observations trimmed across all (g,t) pairs
+
+    // === RBC (Robust Bias Correction) flag ===
+    real scalar    rbc              // 1 = RBC mode: BW selected via p=1 IMSE, estimation via p=2
+
+    // === Undersmooth adaptive adjustment ===
+    real scalar    undersmooth      // 1 = auto-adjust BW to Assumption 4(iii) bounds, 0 = warn only
+    real scalar    bw_adjusted      // 1 = at least one BW was adjusted, 0 = no adjustment
 }
 
 // -----------------------------------------------------------------------------
@@ -148,6 +175,7 @@ struct DidHeteroStage1Results {
     real colvector Z_supp       // 100-point support grid on [min(Z), max(Z)]
     real colvector kd0_Z        // density estimates at zeval
     real colvector kd1_Z        // density derivative estimates at zeval
+    real colvector kde_trimmed  // num_zeval x 1, indicator: 1 = density below threshold
 }
 
 // -----------------------------------------------------------------------------
@@ -345,7 +373,7 @@ struct AggtResult {
 // -----------------------------------------------------------------------------
 string scalar didhetero_version()
 {
-    return("0.1.0")
+    return("1.0.0")
 }
 
 end

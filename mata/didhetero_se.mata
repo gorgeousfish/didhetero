@@ -52,13 +52,7 @@ real scalar didhetero_analytical_crit(
     a_sq = 2 * log((b_val - a_val) / bw_gt) + 2 * log(sqrt(lambda) / (2 * c("pi")))
 
     // Guard: a_sq must be positive for extreme value approximation to hold
-    // Theory requires (b-a)/h -> infinity; when a_sq <= 0, the evaluation
-    // region is too small relative to bandwidth for the Gumbel approximation.
     if (a_sq <= 0) {
-        printf("{txt}Note: analytical UCB not applicable — evaluation region " +
-               "too narrow relative to bandwidth\n")
-        printf("{txt}  (a_sq = %9.4f; need (b-a)/h >> 2*pi/sqrt(lambda) " +
-               "for extreme value approximation)\n", a_sq)
         return(.)
     }
 
@@ -67,7 +61,6 @@ real scalar didhetero_analytical_crit(
     inner = log(1 / sqrt(1 - alp))
 
     if (inner <= 0) {
-        printf("{txt}Warning: log(1/sqrt(1-alp)) <= 0, invalid alp\n")
         return(.)
     }
 
@@ -75,10 +68,6 @@ real scalar didhetero_analytical_crit(
     arg = a_sq - 2 * log_inner
 
     if (arg <= 0) {
-        printf("{txt}Note: analytical UCB not applicable — sqrt argument " +
-               "non-positive (a_sq=%9.4f, 2*log_inner=%9.4f)\n", a_sq, 2*log_inner)
-        printf("{txt}  (evaluation region too narrow relative to bandwidth " +
-               "for Gumbel approximation)\n")
         return(.)
     }
 
@@ -147,7 +136,7 @@ void didhetero_se_analytical_ucb(
     real colvector mathcal_V_gt)
 {
     real scalar R, r, mu_B_bw, sigma2_bw_scalar, sigma2, V_hat_r
-    real scalar n_missing, est_scale
+    real scalar est_scale
     real colvector B_r, mu_B_hat, U_hat, sigma2_bw_vec
 
     R = rows(zeval)
@@ -243,12 +232,8 @@ void didhetero_se_analytical_ucb(
     // Compute analytical critical value via extreme value approximation
     c_hat_gt = didhetero_analytical_crit(zeval, bw_gt, lambda, alp)
 
-    // Handle invalid critical value
+    // Handle invalid critical value (silently; summary printed by caller)
     if (c_hat_gt == .) {
-        printf("{txt}Warning: analytical UCB critical value cannot be computed;" +
-               " analytical CI set to missing.\n")
-        printf("{txt}  Suggestion: use bootstrap uniform confidence bands" +
-               " (bstrap option) instead.\n")
         ci1_l_gt = J(R, 1, .)
         ci1_u_gt = J(R, 1, .)
     }
@@ -258,13 +243,7 @@ void didhetero_se_analytical_ucb(
         ci1_u_gt = est_gt + c_hat_gt * se_gt
     }
 
-    // Report missing standard errors
-    n_missing = sum(se_gt :== .)
-    if (n_missing > 0) {
-        printf("Warning: SE=. at %g of %g evaluation point(s): insufficient local data\n",
-               n_missing, R)
-        printf("  (boundary z-values far from treated units; CI reported as missing)\n")
-    }
+    // Note: SE missing warnings are suppressed here; caller prints summary
 }
 
 end

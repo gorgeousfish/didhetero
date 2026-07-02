@@ -65,9 +65,15 @@ program define didhetero, eclass
         }
 
         local _dh_tok_lc = lower(`"`_dh_tok'"')
-        if `_dh_in_options' & `"`_dh_tok_lc'"' == "nobstrap" {
-            di as err "didhetero does not allow nobstrap; use nobootstrap or bstrap(false)"
-            exit 198
+        // Accept nobstrap as alias for bstrap(false) (unified API with catt_gt)
+        if `"`_dh_tok_lc'"' == "nobstrap" {
+            if `_dh_raw_bstrap_found' {
+                di as error "bstrap() and nobstrap cannot both be specified"
+                exit 198
+            }
+            local _dh_raw_bstrap_found 1
+            local _dh_raw_bstrap_value "false"
+            continue
         }
         if regexm(`"`_dh_tok_lc'"', "^bstrap[(](.*)[)]$") {
             if `_dh_raw_bstrap_found' {
@@ -196,13 +202,8 @@ program define didhetero, eclass
     // Resolve option defaults and conflicts
 
     // Validate bootstrap specifications.
-    if `_dh_raw_bstrap_found' & ("`bstrap'" != "" | "`bootstrap'" != "") {
-        di as err "bstrap() cannot be combined with legacy bootstrap flags"
-        exit 198
-    }
-    // Reject legacy nobstrap flag.
-    if "`bstrap'" == "nobstrap" {
-        di as err "didhetero does not allow nobstrap; use nobootstrap or bstrap(false)"
+    if `_dh_raw_bstrap_found' & (("`bstrap'" != "") | ("`bootstrap'" != "")) {
+        di as err "bstrap()/nobstrap cannot be combined with legacy bootstrap flags"
         exit 198
     }
     if "`bstrap'" != "" & "`bootstrap'" == "nobootstrap" {

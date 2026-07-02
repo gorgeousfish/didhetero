@@ -118,4 +118,20 @@ program define _didhetero_display
     di as text "{hline 72}"
     di as text ""
 
+    // Check if all confidence intervals are missing (inform user)
+    tempname _tmp_res
+    matrix `_tmp_res' = e(results)
+    local _all_ci_miss = 1
+    forvalues i = 1/`nrows' {
+        if `_tmp_res'[`i', 6] != . | `_tmp_res'[`i', 7] != . {
+            local _all_ci_miss = 0
+        }
+    }
+    if `_all_ci_miss' {
+        di as text "Note: All confidence intervals are missing."
+        di as text "  For bootstrap uniform confidence bands, add: biters(999)"
+        di as text "  For analytical UCB, use more evaluation points in zeval()."
+        di as text ""
+    }
+
 end

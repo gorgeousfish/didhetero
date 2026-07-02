@@ -129,11 +129,11 @@ program define didhetero_simdata, rclass
     // =========================================================================
     sort id period
 
-    label variable id     "Individual ID"
+    label variable id     "Panel unit identifier"
     label variable period "Time period"
-    label variable Y      "Observed outcome"
-    label variable G      "Treatment group (0=never-treated)"
-    label variable Z      "Covariate"
+    label variable Y      "Outcome variable"
+    label variable G      "Treatment group (first treatment period, 0=never treated)"
+    label variable Z      "Continuous heterogeneity variable"
 
     if `dimx' > 1 {
         forvalues k = 1/`=`dimx'-1' {

@@ -422,7 +422,7 @@ void didhetero_run_from_ado()
     // have no first-order influence on asymptotic distribution.
     // =========================================================================
     if (_dh_data.verbose) printf("{txt}Stage 1: Parametric estimation (GPS + OR) + KDE...\n")
-    if (_profile_flag) timer_on(1)
+    if (_profile_flag) timer_on(91)
     s1 = didhetero_stage1_dispatch(_dh_data, _dh_data.gteval, _dh_data.geval,
              _dh_data.control_group, _dh_data.anticipation, _dh_data.zeval)
 
@@ -446,7 +446,7 @@ void didhetero_run_from_ado()
         }
     }
 
-    if (_profile_flag) timer_off(1)
+    if (_profile_flag) timer_off(91)
     if (_dh_data.verbose) printf("{txt}  GPS, OR, and density estimation complete\n")
 
     // Store Stage 1 results as external globals
@@ -462,7 +462,7 @@ void didhetero_run_from_ado()
     // Step 4: Bandwidth selection pre-loop
     // =========================================================================
     if (_dh_data.verbose) printf("{txt}Bandwidth selection (%s)...\n", bwselect)
-    if (_profile_flag) timer_on(2)
+    if (_profile_flag) timer_on(92)
 
     // RBC mode: force IMSE1 for bandwidth selection (p=1 rate)
     {
@@ -476,7 +476,7 @@ void didhetero_run_from_ado()
                      s1.kd0_Z, s1.kd1_Z, _bwselect_for_preloop, bw_manual)
     }
 
-    if (_profile_flag) timer_off(2)
+    if (_profile_flag) timer_off(92)
 
     // === Undersmooth adaptive adjustment (Assumption 4(iii)) ===
     if (_dh_data.undersmooth) {
@@ -526,11 +526,11 @@ void didhetero_run_from_ado()
     // === Output performance profile report ===
     if (_profile_flag) {
         real scalar _pf_t1, _pf_t2, _pf_t3, _pf_t4, _pf_t5, _pf_total
-        _pf_t1 = timer_value(1)[1,1]
-        _pf_t2 = timer_value(2)[1,1]
-        _pf_t3 = timer_value(3)[1,1]
-        _pf_t4 = timer_value(4)[1,1]
-        _pf_t5 = timer_value(5)[1,1]
+        _pf_t1 = timer_value(91)[1,1]
+        _pf_t2 = timer_value(92)[1,1]
+        _pf_t3 = timer_value(93)[1,1]
+        _pf_t4 = timer_value(94)[1,1]
+        _pf_t5 = timer_value(95)[1,1]
         _pf_total = _pf_t1 + _pf_t2 + _pf_t3 + _pf_t4 + _pf_t5
 
         printf("\n{txt}Performance Profile (n=%g, num_gt=%g, num_z=%g):\n",

@@ -165,6 +165,7 @@ real matrix didhetero_stage23(
     real scalar r_pos, n_pos_missing, eps_pos
     struct DidHeteroCattResult scalar catt_result
     real scalar _profile_flag
+    real scalar _ucb_fail_count
 
     // --- Read profile flag ---
     _profile_flag = (st_local("_dh_profile") == "1")
@@ -181,10 +182,10 @@ real matrix didhetero_stage23(
     // to the reentrant core function. Bandwidth is pre-resolved, hence
     // bwselect="manual" is specified.
     // =====================================================================
-    if (_profile_flag) timer_on(3)
+    if (_profile_flag) timer_on(93)
     catt_result = didhetero_catt_core(data, gps_mat, or_mat,
                       data.gteval, bw, "manual", data.porder, data.kernel)
-    if (_profile_flag) timer_off(3)
+    if (_profile_flag) timer_off(93)
 
     // --- Copy core results into data struct ---
     data.A_g_t = catt_result.A_g_t
@@ -210,7 +211,8 @@ real matrix didhetero_stage23(
     // Loop over group-time pairs using B_g_t and estimates from core results.
     // Computed only when kd0_Z is available from Stage 1.
     // =====================================================================
-    if (_profile_flag) timer_on(4)
+    _ucb_fail_count = 0
+    if (_profile_flag) timer_on(94)
     for (id_gt = 1; id_gt <= K; id_gt++) {
         if (has_kd0_Z) {
             h_gt = bw[id_gt]
@@ -229,6 +231,11 @@ real matrix didhetero_stage23(
             data.ci1_lower[., id_gt] = ci1_l_gt
             data.ci1_upper[., id_gt] = ci1_u_gt
             data.c_hat[id_gt] = se_c_hat_gt
+
+            // Track UCB failures for consolidated warning
+            if (se_c_hat_gt == .) {
+                _ucb_fail_count++
+            }
 
             // =================================================================
             // Positivity guard for standard errors and confidence intervals
@@ -263,7 +270,15 @@ real matrix didhetero_stage23(
             }
         }
     }
-    if (_profile_flag) timer_off(4)
+    if (_profile_flag) timer_off(94)
+
+    // Consolidated UCB warning (printed once, not per (g,t) pair)
+    if (_ucb_fail_count > 0) {
+        printf("{txt}Note: Analytical UCB not applicable for %g of %g (g,t) pairs\n",
+               _ucb_fail_count, K)
+        printf("{txt}  (evaluation region too narrow relative to bandwidth).\n")
+        printf("{txt}  Use bootstrap inference (biters option) for uniform confidence bands.\n")
+    }
 
     // =================================================================
     // Bootstrap uniform confidence bands
@@ -271,7 +286,7 @@ real matrix didhetero_stage23(
     // confidence bands via weighted bootstrap. Otherwise, set CI2 fields
     // to missing values.
     // =================================================================
-    if (_profile_flag) timer_on(5)
+    if (_profile_flag) timer_on(95)
     if (data.biters > 0) {
         if (seed >= 0 & seed < .) {
             rseed(seed)
@@ -289,7 +304,7 @@ real matrix didhetero_stage23(
         data.ci2_upper = J(num_zeval, K, .)
         data.c_check_bs = J(K, 1, .)
     }
-    if (_profile_flag) timer_off(5)
+    if (_profile_flag) timer_off(95)
 
     return(est)
 }

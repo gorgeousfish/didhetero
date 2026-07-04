@@ -118,13 +118,20 @@ program define _didhetero_display
     di as text "{hline 72}"
     di as text ""
 
-    // Check if all confidence intervals are missing (inform user)
+    // Check if ALL confidence intervals are missing (both ci1 and ci2)
+    // Only show note if user has NO usable CI at all
     tempname _tmp_res
     matrix `_tmp_res' = e(results)
     local _all_ci_miss = 1
     forvalues i = 1/`nrows' {
+        // Check ci1 (cols 6-7) and ci2 (cols 8-9 if bootstrap)
         if `_tmp_res'[`i', 6] != . | `_tmp_res'[`i', 7] != . {
             local _all_ci_miss = 0
+        }
+        if `has_bstrap' == 1 {
+            if `_tmp_res'[`i', 8] != . | `_tmp_res'[`i', 9] != . {
+                local _all_ci_miss = 0
+            }
         }
     }
     if `_all_ci_miss' {

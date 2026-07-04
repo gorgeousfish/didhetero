@@ -20,38 +20,25 @@ program define _didhetero_display
     local num_zeval = e(num_zeval)
     local has_bstrap = e(bstrap)
 
-    // Display per (g,t) pair
+    // === Task 2: Unified table with single header ===
+    di as text ""
+    di as text "{hline 72}"
+    if `has_bstrap' == 1 {
+        di as text "       z        est         se       [95% CI]              bw"
+    }
+    else {
+        di as text "       z        est         se       [95% CI]              bw"
+    }
+    di as text "{hline 72}"
+
     local row = 1
     forvalues gt = 1/`num_gteval' {
         local g1 = `gteval_mat'[`gt', 1]
         local t1 = `gteval_mat'[`gt', 2]
         local bw1 = `bw_mat'[1, `gt']
 
-        di as text ""
-        di as text "{hline 72}"
-        di as text "  Group g = " as result "`g1'" ///
-           as text ",  Period t = " as result "`t1'" ///
-           as text ",  Bandwidth = " as result %9.6f `bw1'
-        di as text "{hline 72}"
-
-        if `has_bstrap' == 1 {
-            di as text "       z" ///
-               as text "       est" ///
-               as text "        se" ///
-               as text "   ci1_low" ///
-               as text "    ci1_up" ///
-               as text "   ci2_low" ///
-               as text "    ci2_up"
-            di as text "{hline 72}"
-        }
-        else {
-            di as text "       z" ///
-               as text "       est" ///
-               as text "        se" ///
-               as text "   ci1_low" ///
-               as text "    ci1_up"
-            di as text "{hline 52}"
-        }
+        // Lightweight group separator
+        di as text " g=`g1', t=`t1'"
 
         forvalues r = 1/`num_zeval' {
             local z_val  = `results'[`row', 3]
@@ -60,62 +47,150 @@ program define _didhetero_display
             local ci1_l  = `results'[`row', 6]
             local ci1_u  = `results'[`row', 7]
 
+            // Choose CI: prefer bootstrap (ci2), fallback to analytical (ci1)
             if `has_bstrap' == 1 {
                 local ci2_l = `results'[`row', 8]
                 local ci2_u = `results'[`row', 9]
-
-                di as result %8.4f `z_val' ///
-                   as result %10.4f `est' ///
-                   as result %10.4f `se' ///
-                   as result %10.4f `ci1_l' ///
-                   as result %10.4f `ci1_u' ///
-                   as result %10.4f `ci2_l' ///
-                   as result %10.4f `ci2_u'
+                local ci_lo = cond(`ci2_l' != ., `ci2_l', `ci1_l')
+                local ci_hi = cond(`ci2_u' != ., `ci2_u', `ci1_u')
             }
             else {
-                di as result %8.4f `z_val' ///
-                   as result %10.4f `est' ///
-                   as result %10.4f `se' ///
-                   as result %10.4f `ci1_l' ///
-                   as result %10.4f `ci1_u'
+                local ci_lo = `ci1_l'
+                local ci_hi = `ci1_u'
             }
+
+            // Format CI as [lo, hi] or [   .  ,    .  ]
+            if `ci_lo' == . | `ci_hi' == . {
+                local ci_str "[    .   ,    .   ]"
+            }
+            else {
+                local _ci_lo_s : di %7.3f `ci_lo'
+                local _ci_hi_s : di %7.3f `ci_hi'
+                local ci_str "[`_ci_lo_s',`_ci_hi_s']"
+            }
+
+            di as result %8.4f `z_val' %10.4f `est' %10.4f `se' ///
+               as text "  `ci_str'" ///
+               as result %10.4f `bw1'
 
             local row = `row' + 1
         }
     }
 
-    // Display critical values
-    di as text ""
     di as text "{hline 72}"
-    di as text "Critical values:"
 
+    // === Task 4: Critical Values matrix display ===
     capture confirm matrix e(c_hat)
-    if !_rc {
-        tempname c_hat_mat
-        matrix `c_hat_mat' = e(c_hat)
-        forvalues gt = 1/`num_gteval' {
-            local g1 = `gteval_mat'[`gt', 1]
-            local t1 = `gteval_mat'[`gt', 2]
-            local cv = `c_hat_mat'[1, `gt']
-            di as text "  Analytical (g=`g1', t=`t1'): " as result %9.6f `cv'
-        }
-    }
-
+    local has_ana = (!_rc)
+    local has_boot = 0
     if `has_bstrap' == 1 {
         capture confirm matrix e(c_check)
-        if !_rc {
-            tempname c_check_mat
+        local has_boot = (!_rc)
+    }
+
+    if `has_ana' | `has_boot' {
+        tempname c_hat_mat c_check_mat
+
+        if `has_ana' {
+            matrix `c_hat_mat' = e(c_hat)
+        }
+        if `has_boot' {
             matrix `c_check_mat' = e(c_check)
-            forvalues gt = 1/`num_gteval' {
-                local g1 = `gteval_mat'[`gt', 1]
-                local t1 = `gteval_mat'[`gt', 2]
-                local cv = `c_check_mat'[1, `gt']
-                di as text "  Bootstrap  (g=`g1', t=`t1'): " as result %9.6f `cv'
+        }
+
+        // Check if all CV values are the same (uniformall case)
+        // Note: missing values are treated as "same" (all missing = uniform)
+        local all_same_ana = 1
+        local all_same_boot = 1
+        if `has_ana' & `num_gteval' > 1 {
+            local _cv_ref = `c_hat_mat'[1, 1]
+            forvalues gt = 2/`num_gteval' {
+                local _cv_cur = `c_hat_mat'[1, `gt']
+                if (`_cv_ref' == . & `_cv_cur' != .) | (`_cv_ref' != . & `_cv_cur' == .) {
+                    local all_same_ana = 0
+                }
+                else if `_cv_ref' != . & `_cv_cur' != . {
+                    if abs(`_cv_cur' - `_cv_ref') > 1e-10 {
+                        local all_same_ana = 0
+                    }
+                }
+            }
+        }
+        if `has_boot' & `num_gteval' > 1 {
+            local _cv_ref = `c_check_mat'[1, 1]
+            forvalues gt = 2/`num_gteval' {
+                local _cv_cur = `c_check_mat'[1, `gt']
+                if (`_cv_ref' == . & `_cv_cur' != .) | (`_cv_ref' != . & `_cv_cur' == .) {
+                    local all_same_boot = 0
+                }
+                else if `_cv_ref' != . & `_cv_cur' != . {
+                    if abs(`_cv_cur' - `_cv_ref') > 1e-10 {
+                        local all_same_boot = 0
+                    }
+                }
+            }
+        }
+
+        if `all_same_ana' & `all_same_boot' {
+            // All CVs identical: single-line display
+            local _cv_parts ""
+            if `has_ana' {
+                local _cv_ana = `c_hat_mat'[1, 1]
+                if `_cv_ana' != . {
+                    local _cv_ana_s : di %7.4f `_cv_ana'
+                    local _cv_parts "Analytical=`_cv_ana_s'"
+                }
+            }
+            if `has_boot' {
+                local _cv_boot = `c_check_mat'[1, 1]
+                if `_cv_boot' != . {
+                    local _cv_boot_s : di %7.4f `_cv_boot'
+                    if "`_cv_parts'" != "" {
+                        local _cv_parts "`_cv_parts' | Bootstrap=`_cv_boot_s'"
+                    }
+                    else {
+                        local _cv_parts "Bootstrap=`_cv_boot_s'"
+                    }
+                }
+            }
+            if "`_cv_parts'" != "" {
+                di as text "Critical values: `_cv_parts'"
+            }
+        }
+        else {
+            // Different CVs: compact matrix
+            di as text "Critical values:"
+            if `has_ana' & `has_boot' {
+                di as text "  (g,t)          Analytical  Bootstrap"
+                forvalues gt = 1/`num_gteval' {
+                    local g1 = `gteval_mat'[`gt', 1]
+                    local t1 = `gteval_mat'[`gt', 2]
+                    local _cv_a = `c_hat_mat'[1, `gt']
+                    local _cv_b = `c_check_mat'[1, `gt']
+                    di as text "  (`g1',`t1')" as result %12.4f `_cv_a' %12.4f `_cv_b'
+                }
+            }
+            else if `has_ana' {
+                di as text "  (g,t)          Analytical"
+                forvalues gt = 1/`num_gteval' {
+                    local g1 = `gteval_mat'[`gt', 1]
+                    local t1 = `gteval_mat'[`gt', 2]
+                    local _cv_a = `c_hat_mat'[1, `gt']
+                    di as text "  (`g1',`t1')" as result %12.4f `_cv_a'
+                }
+            }
+            else {
+                di as text "  (g,t)          Bootstrap"
+                forvalues gt = 1/`num_gteval' {
+                    local g1 = `gteval_mat'[`gt', 1]
+                    local t1 = `gteval_mat'[`gt', 2]
+                    local _cv_b = `c_check_mat'[1, `gt']
+                    di as text "  (`g1',`t1')" as result %12.4f `_cv_b'
+                }
             }
         }
     }
 
-    di as text "{hline 72}"
     di as text ""
 
     // Check if ALL confidence intervals are missing (both ci1 and ci2)

@@ -281,17 +281,32 @@ program define catt_gt, eclass
         local biters = 0
     }
 
-    di as text ""
-    di as text "catt_gt: Conditional ATT with continuous heterogeneity"
-    di as text "  Observations (n): `n_total'"
-    di as text "  Polynomial order: `porder'"
-    di as text "  Kernel:           `kernel'"
-    di as text "  Control group:    `control'"
-    di as text "  Anticipation:     `anticip'"
     local _dh_level = 100 * (1 - `alp')
-    di as text "  Confidence level: `_dh_level'%"
+    di as text ""
+    di as text "catt_gt: Doubly Robust CATT Estimation"
+    // Line 2: core params
+    local _hdr_line2 "  n=`n_total' | p=`porder' | kernel=`kernel' | control=`control' | `_dh_level'% level"
+    if `anticip' > 0 {
+        local _hdr_line2 "`_hdr_line2' | anticip=`anticip'"
+    }
+    di as text "`_hdr_line2'"
+    // Line 3: inference method
+    if `bstrap' == 1 {
+        local _uni_label = cond(`uniform'==1, "global", "z-only")
+        di as text "  Bootstrap: `biters' iter (Mammen) | Uniform: `_uni_label'"
+    }
+    else {
+        di as text "  Inference: Analytical only"
+    }
+    // Line 4: bandwidth
+    if "`bw'" != "" {
+        di as text "  Bandwidth: manual (h=`bw')"
+    }
+    else {
+        di as text "  Bandwidth: `bwselect'"
+    }
     if "`xformula_display'" != "" {
-        di as text "  Covariate spec:   `xformula_display'"
+        di as text "  Covariates: `xformula_display'"
     }
     di as text ""
 

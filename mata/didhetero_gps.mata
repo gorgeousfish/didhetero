@@ -68,7 +68,8 @@ real colvector didhetero_invlogit(real colvector x)
 // -----------------------------------------------------------------------------
 real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
                                     real matrix X_full, real colvector pi_hat,
-                                    | real scalar strict, real rowvector diag_row)
+                                    | real scalar strict, real rowvector diag_row,
+                                      real scalar verbose)
 {
     real scalar n_sub, n_full, k, max_iter, iter, converged
     real scalar tol, tol_grad, tol_rel_ll
@@ -82,6 +83,7 @@ real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
     
     // Default: soft failure (backward compatible)
     if (args() < 5) strict = 0
+    if (args() < 7) verbose = 0
     
     // Initialize coefficients at zero
     pi_hat = J(k, 1, 0)
@@ -187,17 +189,19 @@ real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
         }
         
         printf("{txt}Warning: GPS logit did not converge in %g iterations\n", max_iter)
-        printf("{txt}  Diagnostics at final iteration:\n")
-        printf("{txt}    Gradient norm (max|score|):      %12.6e\n", _final_grad_norm)
-        printf("{txt}    Parameter step (max|delta|):     %12.6e\n", _final_step_norm)
-        printf("{txt}    Relative log-likelihood change:  %12.6e\n", _final_rel_ll)
-        printf("{txt}    Log-likelihood:                  %12.4f\n", iter_history[max_iter, 4])
-        if (max_iter >= 3) {
-            printf("{txt}    Last 3 iterations ll: %12.4f -> %12.4f -> %12.4f\n",
-                iter_history[max_iter-2, 4], iter_history[max_iter-1, 4], iter_history[max_iter, 4])
+        if (verbose) {
+            printf("{txt}  Diagnostics at final iteration:\n")
+            printf("{txt}    Gradient norm (max|score|):      %12.6e\n", _final_grad_norm)
+            printf("{txt}    Parameter step (max|delta|):     %12.6e\n", _final_step_norm)
+            printf("{txt}    Relative log-likelihood change:  %12.6e\n", _final_rel_ll)
+            printf("{txt}    Log-likelihood:                  %12.4f\n", iter_history[max_iter, 4])
+            if (max_iter >= 3) {
+                printf("{txt}    Last 3 iterations ll: %12.4f -> %12.4f -> %12.4f\n",
+                    iter_history[max_iter-2, 4], iter_history[max_iter-1, 4], iter_history[max_iter, 4])
+            }
+            printf("{txt}  Note: Results may be unreliable. Check for complete/quasi-separation in data.\n")
+            printf("{txt}  Hint: Use gpsstrict option to enforce convergence as an error.\n")
         }
-        printf("{txt}  Note: Results may be unreliable. Check for complete/quasi-separation in data.\n")
-        printf("{txt}  Hint: Use gpsstrict option to enforce convergence as an error.\n")
     }
     
     // Full-sample prediction
@@ -214,10 +218,11 @@ real colvector didhetero_gps_logit(real colvector y_sub, real matrix X_sub,
         real scalar _n_extreme, _sep_threshold, _cond_number
         _sep_threshold = 0.01
         _n_extreme = sum(p_full :< _sep_threshold) + sum(p_full :> (1 - _sep_threshold))
-        if (_n_extreme > 0) {
-            printf("{txt}Warning: GPS logit may exhibit quasi-separation\n")
-            printf("{txt}         %g of %g observations (%5.1f pct) have predicted P outside [%5.3f, %5.3f]\n",
-                _n_extreme, n_full, 100 * _n_extreme / n_full, _sep_threshold, 1 - _sep_threshold)
+        if (_n_extreme > 0 & verbose) {
+            printf("{txt}  GPS quasi-separation detail: %g/%g obs extreme\n",
+                _n_extreme, n_full)
+            printf("{txt}         %5.1f pct have predicted P outside [%5.3f, %5.3f]\n",
+                100 * _n_extreme / n_full, _sep_threshold, 1 - _sep_threshold)
             if (_n_extreme > 0.25 * n_full) {
                 printf("{res}         CAUTION: >25 pct extreme predictions suggest model misspecification or overlap violation\n")
             }
@@ -286,6 +291,12 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
     gps_mat  = J(0, 0, .)
     gps_coef = J(0, 0, .)
     
+    // Quasi-separation aggregation tracking
+    real scalar _qs_count, _qs_total, _qs_max_extreme
+    _qs_count = 0
+    _qs_total = 0
+    _qs_max_extreme = 0
+    
     if (control_group == "nevertreated") {
         // =====================================================================
         // Never-treated control: estimate one GPS per treatment group
@@ -313,10 +324,17 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
             // Estimate logit and predict on full sample
             pi_hat = J(k, 1, .)
             diag_row = J(1, 6, .)
-            p_hat = didhetero_gps_logit(y_sub, X_sub, data.X, pi_hat, _gps_strict, diag_row)
+            p_hat = didhetero_gps_logit(y_sub, X_sub, data.X, pi_hat, _gps_strict, diag_row, data.verbose)
             
             // Store diagnostics for this group
             data.gps_diagnostics[i, .] = diag_row
+            
+            // Track quasi-separation for aggregated warning
+            _qs_total = _qs_total + 1
+            if (diag_row[5] > 0) {
+                _qs_count = _qs_count + 1
+                if (diag_row[5] > _qs_max_extreme) _qs_max_extreme = diag_row[5]
+            }
             
             // Verbose output: GPS convergence diagnostics per group
             if (data.verbose) {
@@ -383,10 +401,17 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
             // Estimate logit and predict on full sample
             pi_hat = J(k, 1, .)
             diag_row = J(1, 6, .)
-            p_hat = didhetero_gps_logit(y_sub, X_sub, data.X, pi_hat, _gps_strict, diag_row)
+            p_hat = didhetero_gps_logit(y_sub, X_sub, data.X, pi_hat, _gps_strict, diag_row, data.verbose)
             
             // Store diagnostics for this (g,t) pair
             data.gps_diagnostics[j, .] = diag_row
+            
+            // Track quasi-separation for aggregated warning
+            _qs_total = _qs_total + 1
+            if (diag_row[5] > 0) {
+                _qs_count = _qs_count + 1
+                if (diag_row[5] > _qs_max_extreme) _qs_max_extreme = diag_row[5]
+            }
             
             // Verbose output: GPS convergence diagnostics per (g,t) pair
             if (data.verbose) {
@@ -412,6 +437,12 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
     }
     else {
         _error("GPS estimate: invalid control_group '" + control_group + "'")
+    }
+    
+    // Aggregated quasi-separation warning (single summary line)
+    if (_qs_count > 0) {
+        printf("{txt}Warning: GPS quasi-separation in %g of %g (g,t) pairs (max: %g/%g obs extreme)\n",
+            _qs_count, _qs_total, _qs_max_extreme, n)
     }
     
     // Store total trimmed count in data struct

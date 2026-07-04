@@ -137,14 +137,16 @@ struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
             }
         }
         if (_kde_trunc_count > 0) {
-            printf("{txt}Note: %g of %g density evaluation points (%.1f%s) below threshold (%.2e)\n",
-                _kde_trunc_count, rows(kd0_Z), 100 * _kde_trunc_count / rows(kd0_Z), "%", _kde_threshold)
-            printf("{txt}      Low-density z-values:")
-            for (r = 1; r <= rows(kd0_Z); r++) {
-                if (_kde_trimmed_vec[r] == 1) printf(" %.4g", zeval[r])
+            printf("{txt}Note: %g/%g evaluation points below density threshold\n",
+                _kde_trunc_count, rows(kd0_Z))
+            if (data.verbose) {
+                printf("{txt}      Threshold: %.2e, low-density z-values:", _kde_threshold)
+                for (r = 1; r <= rows(kd0_Z); r++) {
+                    if (_kde_trimmed_vec[r] == 1) printf(" %.4g", zeval[r])
+                }
+                printf("\n")
+                printf("{txt}      These points may have unreliable variance estimates (1/f_Z inflation)\n")
             }
-            printf("\n")
-            printf("{txt}      These points may have unreliable variance estimates (1/f_Z inflation)\n")
         }
 
         results.kde_trimmed = _kde_trimmed_vec
@@ -152,10 +154,16 @@ struct DidHeteroStage1Results scalar didhetero_stage1_dispatch(
 
     // Step 5: Density derivative estimation kd1_Z using local polynomial (p=3, v=2)
     kd1_Z = didhetero_kde_deriv(Z, zeval)
-    // Missing value check (warn only, no truncation)
-    for (r = 1; r <= rows(kd1_Z); r++) {
-        if (kd1_Z[r] == . | kd1_Z[r] >= .) {
-            printf("{txt}Warning: density derivative estimate missing at z=%g, WLS matrix may be singular\n", zeval[r])
+    // Missing value check (warn only, no truncation) — aggregated
+    {
+        real scalar _kd1_miss_count
+        _kd1_miss_count = 0
+        for (r = 1; r <= rows(kd1_Z); r++) {
+            if (kd1_Z[r] == . | kd1_Z[r] >= .) _kd1_miss_count++
+        }
+        if (_kd1_miss_count > 0) {
+            printf("{txt}Note: %g/%g density derivative estimates missing (WLS may be singular)\n",
+                _kd1_miss_count, rows(kd1_Z))
         }
     }
 

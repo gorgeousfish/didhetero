@@ -1232,16 +1232,11 @@ void didhetero_aggte_se(
         else {
             ci1_lower = J(num_zeval, 1, .)
             ci1_upper = J(num_zeval, 1, .)
-            printf("{txt}Warning: analytical UCB critical value cannot be computed; leaving aggte analytical CI missing\n")
+            // UCB warning suppressed here; aggregated by caller
         }
 
-        // Diagnostic: count missing SEs
+        // Diagnostic: count missing SEs (verbose-level info)
         n_missing = sum(se :>= .)
-        if (n_missing > 0) {
-            printf("Warning: aggte SE=. at %g of %g evaluation point(s): insufficient local data\n",
-                n_missing, num_zeval)
-            printf("  (boundary z-values far from treated/control units; CI reported as missing)\n")
-        }
     }
 }
 
@@ -1770,13 +1765,15 @@ struct AggtResult scalar didhetero_aggte_main(
     real colvector c_check_catt,
     struct DidHeteroData scalar pass2_data,
     real matrix pass2_gps_mat,
-    real matrix pass2_or_mat)
+    real matrix pass2_or_mat,
+    | real scalar verbose)
 {
     // --- Local declarations ---
     struct AggtResult scalar result
     real scalar num_eval, num_zeval, num_gteval
     real scalar id_eval, id_gt, k
     real scalar e1, h_agg, h_common, num_gte
+    real scalar _ucb_fail_count
 
     real matrix gteeval
     real colvector gt_indices
@@ -1801,6 +1798,10 @@ struct AggtResult scalar didhetero_aggte_main(
     real matrix mb_weight, mb_sup_t
     real colvector ci2_lower_e, ci2_upper_e
 
+    // Default verbose = 0 (quiet)
+    if (args() < 32) verbose = 0
+    _ucb_fail_count = 0
+
     // Extract dimensions and initialize result
     num_eval   = rows(eval_points)
     num_zeval  = rows(zeval)
@@ -1821,8 +1822,8 @@ struct AggtResult scalar didhetero_aggte_main(
     h_agg_vec    = J(num_eval, 1, .)
     shortcircuit = J(num_eval, 1, 0)
 
-    printf("{txt}aggte_gt: starting aggregation (%s, %g eval points)\n",
-           type, num_eval)
+    printf("{txt}aggte_gt: %s aggregation (%g eval points)\n",
+           strupper(substr(type, 1, 1)) + substr(type, 2, .), num_eval)
 
     // Pre-generate bootstrap weights (shared across all eval points)
     if (bstrap) {
@@ -1831,12 +1832,14 @@ struct AggtResult scalar didhetero_aggte_main(
         }
         mb_weight = _didhetero_mammen_weights_batch(biters, n)
         mb_sup_t  = J(biters, num_eval, .)
-        printf("{txt}  Bootstrap: %g iterations, weights pre-generated\n",
-               biters)
+        if (verbose) {
+            printf("{txt}  Bootstrap: %g iterations, weights pre-generated\n",
+                   biters)
+        }
     }
 
     // Phase 1: Pass 1 estimation — triplet filtering, weights, xi/J, BW selection
-    printf("{txt}  Phase 1: Pass 1 estimation...\n")
+    if (verbose) printf("{txt}  Phase 1: Pass 1 estimation...\n")
 
     for (id_eval = 1; id_eval <= num_eval; id_eval++) {
 
@@ -1849,7 +1852,7 @@ struct AggtResult scalar didhetero_aggte_main(
 
         // Skip if no matching triples
         if (num_gte == 0) {
-            printf("{txt}    eval[%g]=%g: no matching (g,t), skipping\n",
+            if (verbose) printf("{txt}    eval[%g]=%g: no matching (g,t), skipping\n",
                    id_eval, e1)
             shortcircuit[id_eval] = 1
             continue
@@ -1871,8 +1874,9 @@ struct AggtResult scalar didhetero_aggte_main(
                 else {
                     result.ci1_lower[id_eval, .] = J(1, num_zeval, .)
                     result.ci1_upper[id_eval, .] = J(1, num_zeval, .)
-                    printf("{txt}Warning: upstream analytical c_hat is unavailable for short-circuit aggte eval[%g]=%g; leaving analytical CI missing\n",
+                    if (verbose) printf("{txt}Warning: upstream analytical c_hat is unavailable for short-circuit aggte eval[%g]=%g; leaving analytical CI missing\n",
                         id_eval, e1)
+                    _ucb_fail_count++
                 }
                 // Bandwidth for short-circuit evals:
                 // - If bwselect=="manual": honor user-specified scalar/vector
@@ -1905,7 +1909,7 @@ struct AggtResult scalar didhetero_aggte_main(
                 }
             }
             shortcircuit[id_eval] = 1
-            printf("{txt}    eval[%g]=%g: num_gte=1, short-circuit\n",
+            if (verbose) printf("{txt}    eval[%g]=%g: num_gte=1, short-circuit\n",
                    id_eval, e1)
             continue
         }
@@ -1956,7 +1960,7 @@ struct AggtResult scalar didhetero_aggte_main(
                 n, bwselect, kernel, uniformall)
         }
 
-        printf("{txt}    eval[%g]=%g: num_gte=%g, h_pass1=%9.6f\n",
+        if (verbose) printf("{txt}    eval[%g]=%g: num_gte=%g, h_pass1=%9.6f\n",
                id_eval, e1, num_gte, h_agg_vec[id_eval])
     }
 
@@ -1981,14 +1985,14 @@ struct AggtResult scalar didhetero_aggte_main(
             for (id_eval = 1; id_eval <= num_eval; id_eval++) {
                 h_agg_vec[id_eval] = h_common
             }
-            printf("{txt}  uniformall: common h = %9.6f\n", h_common)
+            if (verbose) printf("{txt}  uniformall: common h = %9.6f\n", h_common)
         }
     }
 
     result.aggte_bw = h_agg_vec
 
     // Phase 2: Pass 2 re-estimation with optimal bandwidth
-    printf("{txt}  Phase 2: Pass 2 re-estimation + SE...\n")
+    if (verbose) printf("{txt}  Phase 2: Pass 2 re-estimation + SE...\n")
 
     for (id_eval = 1; id_eval <= num_eval; id_eval++) {
 
@@ -1999,7 +2003,7 @@ struct AggtResult scalar didhetero_aggte_main(
 
         // Skip if bandwidth is missing
         if (h_agg >= . | h_agg <= 0) {
-            printf("{txt}    eval[%g]=%g: bw missing, skipping\n",
+            if (verbose) printf("{txt}    eval[%g]=%g: bw missing, skipping\n",
                    id_eval, e1)
             continue
         }
@@ -2029,6 +2033,9 @@ struct AggtResult scalar didhetero_aggte_main(
         result.ci1_lower[id_eval, .] = ci1_lower_e'
         result.ci1_upper[id_eval, .] = ci1_upper_e'
 
+        // Track UCB failures for aggregated warning
+        if (ci1_lower_e[1] >= .) _ucb_fail_count++
+
         // Bootstrap Phase A
         if (bstrap) {
             didhetero_aggte_bootstrap(
@@ -2040,7 +2047,7 @@ struct AggtResult scalar didhetero_aggte_main(
                 mb_sup_t)
         }
 
-        printf("{txt}    eval[%g]=%g: h=%9.6f, est[1]=%9.6f, se[1]=%9.6f\n",
+        if (verbose) printf("{txt}    eval[%g]=%g: h=%9.6f, est[1]=%9.6f, se[1]=%9.6f\n",
                id_eval, e1, h_agg, aggte_est_p2[1], se_e[1])
     }
 
@@ -2052,7 +2059,13 @@ struct AggtResult scalar didhetero_aggte_main(
                         num_eval, num_zeval, biters, alp, uniformall)
     }
 
-    printf("{txt}aggte_gt: aggregation complete\n")
+    if (verbose) printf("{txt}aggte_gt: aggregation complete\n")
+
+    // Aggregated UCB warning (if any eval points had missing analytical CI)
+    if (_ucb_fail_count > 0) {
+        printf("{txt}Warning: analytical UCB critical value unavailable for %g of %g eval points; analytical CI set to missing\n",
+            _ucb_fail_count, num_eval)
+    }
 
     return(result)
 }
@@ -2408,7 +2421,24 @@ void _didhetero_aggte_ado_entry(
         B_g_t, G_g, Z, mu_G_g, gteval_mat,
         catt_est_mat, catt_se_mat, zeval, bw_catt,
         kd0_Z, kd1_Z, Z_supp, gbar, n,
-        c_hat_catt, c_check_catt, pass2_data, gps_mat, or_mat)
+        c_hat_catt, c_check_catt, pass2_data, gps_mat, or_mat, 0)
+
+    // Compact summary line: Bootstrap + Bandwidth
+    {
+        real scalar _bw_display
+        string scalar _bw_str, _bstrap_info
+        // Use first non-missing bandwidth for summary
+        _bw_display = .
+        for (id_eval = 1; id_eval <= num_eval; id_eval++) {
+            if (R.aggte_bw[id_eval] < .) {
+                _bw_display = R.aggte_bw[id_eval]
+                break
+            }
+        }
+        _bw_str = (_bw_display < . ? sprintf("%7.4f", _bw_display) : ".")
+        _bstrap_info = (bstrap ? sprintf("%g iter", biters) : "off")
+        printf("{txt}  Bootstrap: %s | Bandwidth: %s\n", _bstrap_info, _bw_str)
+    }
 
     // Build combined results matrix.
     //

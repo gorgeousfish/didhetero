@@ -85,7 +85,7 @@ real colvector didhetero_bw_preloop(
             bw_vec = J(K, 1, min(bw_vec))
         }
         // Undersmoothing condition diagnostic (Assumption 4(iii))
-        _didhetero_bw_check_undersmooth(bw_vec, n, bwselect)
+        _didhetero_bw_check_undersmooth(bw_vec, n, bwselect, data.verbose)
         return(bw_vec)
     }
 

@@ -1345,12 +1345,16 @@ real scalar _didhetero_bw_adjust_undersmooth(real colvector bw_vec,
 //   bwselect    - bandwidth selection method string (for context in message)
 //
 void _didhetero_bw_check_undersmooth(real colvector bw_vec, real scalar n,
-                                      string scalar bwselect)
+                                      string scalar bwselect,
+                                      | real scalar verbose)
 {
     real scalar K, eps, h_lower, h_upper
     real scalar n_below, n_above, n_nh_low
     real scalar h_min, h_max, nh_min
     real scalar id_gt, h_val, nh_eff
+    real scalar _n_issues
+
+    if (args() < 4) verbose = 0
 
     K = rows(bw_vec)
     if (K == 0) return
@@ -1388,33 +1392,43 @@ void _didhetero_bw_check_undersmooth(real colvector bw_vec, real scalar n,
         if (nh_eff < 30)     n_nh_low = n_nh_low + 1
     }
 
-    // --- Output summary warnings ---
+    // --- Output summary warnings (aggregated) ---
+    _n_issues = (n_below > 0) + (n_above > 0) + (n_nh_low > 0)
 
-    // Check 1: Bandwidths below lower bound (effective sample too small)
-    if (n_below > 0) {
-        printf("{txt}Warning: %g out of %g (g,t) pairs have bandwidth below lower bound.\n",
-               n_below, K)
-        printf("{txt}  h < n^(-0.49) = %9.6f. Effective sample size may be too small.\n",
-               h_lower)
+    if (_n_issues == 1) {
+        // Single issue: one-line summary
+        if (n_below > 0) {
+            printf("{txt}Note: %g/%g pairs have h below lower bound n^(-0.49)\n", n_below, K)
+        }
+        else if (n_above > 0) {
+            printf("{txt}Note: %g/%g pairs violate undersmoothing condition\n", n_above, K)
+        }
+        else {
+            printf("{txt}Note: %g/%g pairs have nh < 30\n", n_nh_low, K)
+        }
+        if (verbose) {
+            if (n_below > 0) {
+                printf("{txt}  h < n^(-0.49) = %9.6f. Effective sample size may be too small.\n", h_lower)
+            }
+            else if (n_above > 0) {
+                printf("{txt}  Range: [%9.6f, %9.6f], upper bound = %9.6f\n", h_min, h_max, h_upper)
+                printf("{txt}  Assumption 4(iii) may be violated; consider bootstrap inference.\n")
+            }
+            else {
+                printf("{txt}  Minimum nh = %9.1f. Asymptotic approximations may be unreliable.\n", nh_min)
+            }
+        }
     }
-
-    // Check 2: Bandwidths above upper bound (undersmoothing violated)
-    if (n_above > 0) {
-        printf("{txt}Warning: %g out of %g (g,t) pairs have bandwidths violating undersmoothing condition.\n",
-               n_above, K)
-        printf("{txt}  Range of selected bandwidths: [%9.6f, %9.6f]\n", h_min, h_max)
-        printf("{txt}  Theoretical upper bound for n=%g: n^(-1/9-eps) = %9.6f\n",
-               n, h_upper)
-        printf("{txt}  Assumption 4(iii) may be violated; analytical confidence bands\n")
-        printf("{txt}  may have incorrect coverage. Consider bootstrap inference.\n")
-    }
-
-    // Check 3: Extremely low effective sample size
-    if (n_nh_low > 0) {
-        printf("{txt}Warning: %g out of %g (g,t) pairs have effective sample size nh < 30.\n",
-               n_nh_low, K)
-        printf("{txt}  Minimum nh = %9.1f. Asymptotic approximations may be unreliable.\n",
-               nh_min)
+    else if (_n_issues > 1) {
+        // Multiple issues: aggregated summary
+        printf("{txt}Note: %g bandwidth issue(s) detected", _n_issues)
+        if (verbose == 0) printf(" (use verbose for details)")
+        printf("\n")
+        if (verbose) {
+            if (n_below > 0) printf("{txt}  - %g pairs: h below n^(-0.49)\n", n_below)
+            if (n_above > 0) printf("{txt}  - %g pairs: h above n^(-1/9-eps) (undersmoothing violated)\n", n_above)
+            if (n_nh_low > 0) printf("{txt}  - %g pairs: nh < 30 (min nh = %9.1f)\n", n_nh_low, nh_min)
+        }
     }
 }
 

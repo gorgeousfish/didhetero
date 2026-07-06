@@ -83,6 +83,17 @@ omitted, the mode is inferred from the preferred results matrix
 dimensions.
 
 {phang}
+{it:Prerequisite for} {cmd:plot_type(Aggregated)}{it::} you must run
+{helpb aggte_gt} first. The aggregated band is read from the 8- or
+9-column matrix that {helpb aggte_gt} stores in {cmd:e(Estimate)}. If you
+call {cmd:plot_type(Aggregated)} directly after {helpb catt_gt} or
+{helpb didhetero} (without an intervening {helpb aggte_gt}), {cmd:e(Estimate)}
+still holds the 10-column CATT matrix, whose schema does not match the
+aggregated layout, and the command exits with an error. Run
+{helpb aggte_gt} to produce the aggregated results before requesting this
+plot mode.
+
+{phang}
 {opt save_path(string)} specifies a file path for the last generated
 graph. Paths ending in {cmd:.gph} are saved with {helpb graph save};
 other suffixes such as {cmd:.png} and {cmd:.pdf} are exported with
@@ -165,6 +176,16 @@ panel before plotting.
 {cmd:catt_gt_graph} does not modify {cmd:e()} and can therefore be
 called multiple times in a row with different {opt plot_type()} or
 {opt graph_opt()} values on the same estimation result.
+
+{pstd}
+Using {opt plot_type(aggregated)} requires that {helpb aggte_gt} has
+already been run so that the aggregated results matrix (8 or 9 columns)
+is present in {cmd:e(Estimate)}. {helpb catt_gt} and {helpb didhetero}
+store a 10-column CATT matrix instead, so requesting the aggregated plot
+mode without first running {helpb aggte_gt} produces a column-schema
+mismatch and the command stops with an error. The intended workflow is
+therefore to run {helpb aggte_gt} first and {cmd:catt_gt_graph,}
+{cmd:plot_type(aggregated)} afterwards (see Example 3).
 
 
 {marker stored}{...}

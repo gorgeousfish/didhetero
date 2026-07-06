@@ -113,6 +113,36 @@ real matrix _didhetero_construct_B(
 
 
 // -----------------------------------------------------------------------------
+// _didhetero_progress_on()
+// Display-only heuristic deciding whether to emit lightweight (g,t)-loop
+// progress messages during estimation. NEVER affects numerical results.
+//
+// Progress is shown only for tasks expected to run long enough that silent
+// computation would leave the user without feedback:
+//   - analytical path: cost grows with (g,t) pairs x evaluation points
+//     (nested bandwidth selection + LPR per (g,t) per evaluation point)
+//   - bootstrap path:  cost grows with the number of iterations (biters)
+//
+// Suppressed when verbose is on (verbose already prints stage-level detail,
+// so per-pair lines would duplicate it) and when there is only a single
+// (g,t) pair (a "pair i/1" counter carries no information). Coordinates with
+// the profile option, which is orthogonal (it reports timings at the end).
+// -----------------------------------------------------------------------------
+real scalar _didhetero_progress_on(
+    real scalar K,
+    real scalar R,
+    real scalar biters,
+    real scalar verbose)
+{
+    if (verbose) return(0)
+    if (K < 2) return(0)
+    if (biters >= 200) return(1)
+    if (K * R >= 50) return(1)
+    return(0)
+}
+
+
+// -----------------------------------------------------------------------------
 // didhetero_stage23()
 // Main estimation orchestrator for the second and third stages.
 //
@@ -166,6 +196,7 @@ real matrix didhetero_stage23(
     struct DidHeteroCattResult scalar catt_result
     real scalar _profile_flag
     real scalar _ucb_fail_count
+    real scalar _show_progress, _boot_show
 
     // --- Read profile flag ---
     _profile_flag = (st_local("_dh_profile") == "1")
@@ -175,6 +206,13 @@ real matrix didhetero_stage23(
     K = data.num_gteval
     num_zeval = data.num_zeval
 
+    // --- Progress-reporting decision (display only; no numerical effect) ---
+    _show_progress = _didhetero_progress_on(K, num_zeval, data.biters,
+                         data.verbose)
+    // Bootstrap emits its own "Bootstrap: ..." progress lines; enable them for
+    // verbose runs or when iterations are numerous enough to be slow.
+    _boot_show = (data.verbose | (data.biters >= 200))
+
     // =====================================================================
     // Core CATT estimation via didhetero_catt_core()
     // Delegates intermediate variable construction, nuisance parameter
@@ -182,6 +220,9 @@ real matrix didhetero_stage23(
     // to the reentrant core function. Bandwidth is pre-resolved, hence
     // bwselect="manual" is specified.
     // =====================================================================
+    if (_show_progress) {
+        printf("{txt}  computing CATT point estimates for %g (g,t) pairs ...\n", K)
+    }
     if (_profile_flag) timer_on(93)
     catt_result = didhetero_catt_core(data, gps_mat, or_mat,
                       data.gteval, bw, "manual", data.porder, data.kernel)
@@ -214,6 +255,9 @@ real matrix didhetero_stage23(
     _ucb_fail_count = 0
     if (_profile_flag) timer_on(94)
     for (id_gt = 1; id_gt <= K; id_gt++) {
+        if (_show_progress) {
+            printf("{txt}  estimating (g,t) pair %g/%g ...\n", id_gt, K)
+        }
         if (has_kd0_Z) {
             h_gt = bw[id_gt]
 
@@ -272,12 +316,16 @@ real matrix didhetero_stage23(
     }
     if (_profile_flag) timer_off(94)
 
-    // Consolidated UCB warning (printed once, not per (g,t) pair)
+    // Consolidated UCB note (printed once, not per (g,t) pair).
+    // Per Theorem 2, the analytical UCB relies on an extreme-value approximation
+    // that requires the evaluation range to be wide relative to the bandwidth
+    // ((b-a)/h large). When this does not hold the analytical band is omitted;
+    // this is expected behaviour, not an error, hence a single Note.
     if (_ucb_fail_count > 0) {
-        printf("{txt}Note: Analytical UCB not applicable for %g of %g (g,t) pairs\n",
+        printf("{txt}Note: Analytical UCB not applicable for %g of %g (g,t) pair(s)\n",
                _ucb_fail_count, K)
-        printf("{txt}  (evaluation region too narrow relative to bandwidth).\n")
-        printf("{txt}  Use bootstrap inference (biters option) for uniform confidence bands.\n")
+        printf("{txt}      (evaluation region too narrow relative to bandwidth; see Theorem 2).\n")
+        printf("{txt}      Use bootstrap (biters() option) to obtain uniform confidence bands.\n")
     }
 
     // =================================================================
@@ -297,7 +345,7 @@ real matrix didhetero_stage23(
             n, data.porder, data.kernel, data.alp, data.biters,
             data.uniformall, K, num_zeval,
             data.ci2_lower, data.ci2_upper, data.c_check_bs,
-            100, data.verbose)
+            100, _boot_show)
     }
     else {
         data.ci2_lower = J(num_zeval, K, .)

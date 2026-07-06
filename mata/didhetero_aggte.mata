@@ -1875,7 +1875,7 @@ struct AggtResult scalar didhetero_aggte_main(
                 else {
                     result.ci1_lower[id_eval, .] = J(1, num_zeval, .)
                     result.ci1_upper[id_eval, .] = J(1, num_zeval, .)
-                    if (verbose) printf("{txt}Warning: upstream analytical c_hat is unavailable for short-circuit aggte eval[%g]=%g; leaving analytical CI missing\n",
+                    if (verbose) printf("{txt}Note: analytical UCB not applicable for short-circuit aggte eval[%g]=%g; analytical CI left missing\n",
                         id_eval, e1)
                     _ucb_fail_count++
                 }
@@ -2062,10 +2062,16 @@ struct AggtResult scalar didhetero_aggte_main(
 
     if (verbose) printf("{txt}aggte_gt: aggregation complete\n")
 
-    // Aggregated UCB warning (if any eval points had missing analytical CI)
+    // Aggregated UCB note (if any eval points had missing analytical CI).
+    // Per Theorem 2 the analytical UCB requires the evaluation range to be wide
+    // relative to the bandwidth; when it is not, the analytical band is omitted.
+    // This is expected behaviour, not an error, hence a single Note (matching
+    // the CATT-level wording), printed once for the whole aggregation.
     if (_ucb_fail_count > 0) {
-        printf("{txt}Warning: analytical UCB critical value unavailable for %g of %g eval points; analytical CI set to missing\n",
+        printf("{txt}Note: Analytical UCB not applicable for %g of %g aggregation point(s)\n",
             _ucb_fail_count, num_eval)
+        printf("{txt}      (evaluation region too narrow relative to bandwidth; see Theorem 2).\n")
+        printf("{txt}      Use bootstrap (biters() option) to obtain uniform confidence bands.\n")
     }
 
     return(result)

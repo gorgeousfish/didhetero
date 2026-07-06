@@ -126,7 +126,10 @@ treatment effect heterogeneity is estimated. Must be time-invariant within each
 is estimated. These should lie within the support of {it:z}. The command sorts
 {opt zeval()} into ascending order before estimation, and both {cmd:e(zeval)}
 and the rows of {cmd:e(results)} are returned in that ascending-order {it:z}
-layout rather than the raw input order.
+layout rather than the raw input order. The analytical critical value depends
+on the range of {opt zeval()}: a grid much narrower than the sample support of
+{it:z} shrinks the analytical uniform band, so evaluation grids should span
+the substantively relevant range of {it:z}.
 
 {dlgtab:Covariates}
 
@@ -208,7 +211,10 @@ inference. Bootstrap is enabled by default; omit the option or pass
 
 {phang}
 {opt biters(#)} sets the number of bootstrap iterations. Default is
-{cmd:1000}. Must be a positive integer when the bootstrap is enabled.
+{cmd:1000}. Must be a positive integer when the bootstrap is enabled. A common
+convention is to choose the number of iterations {it:B} so that
+({it:B}+1){it:alpha} is an integer, for example {cmd:biters(999)} with
+{cmd:alp(0.05)}.
 
 {phang}
 {opt seed(#)} sets the Stata RNG seed immediately before the bootstrap
@@ -247,7 +253,11 @@ event_time = -1 when {cmd:anticipation(0)}. Default is {cmd:0}.
 {phang}
 {opt pretrend} includes pre-treatment periods in the estimation so that
 CATT estimates can be plotted against a zero reference line for visual
-pre-trends diagnostics. Only applicable when {opt gteval()} is omitted,
+pre-trends diagnostics. For pre-treatment (g,t) pairs the command implements
+the pre-treatment doubly robust estimand of Imai, Qin, and Yanagi (2026,
+Appendix F): the comparison pool is anchored at t = g, so cohorts treated
+within the pre-trend window are excluded from both the propensity-score and
+outcome-regression samples. Only applicable when {opt gteval()} is omitted,
 because an explicit {opt gteval()} already fixes the evaluation pairs.
 
 {dlgtab:Legacy flags}

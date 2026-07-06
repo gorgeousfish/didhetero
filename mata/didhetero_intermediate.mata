@@ -200,7 +200,9 @@ struct DidHeteroIntermediate scalar didhetero_intermediate_vars(
     }
     else {
         // Comparison group includes never-treated and not-yet-treated units
-        threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
+        // (anchored at t = g for pre-treatment pairs; see
+        // didhetero_comp_threshold_ord)
+        threshold_ord = didhetero_comp_threshold_ord(g1, t1, anticipation, data.t_vals)
         G_ord = J(rows(data.G), 1, 0)
         for (i = 1; i <= rows(data.G); i++) {
             if (data.G[i] != 0) {

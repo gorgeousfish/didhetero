@@ -94,6 +94,32 @@ real scalar didhetero_time_is_valid(real scalar t1, real scalar anticipation, re
 }
 
 // -----------------------------------------------------------------------------
+// didhetero_comp_threshold_ord()
+// Ordinal period threshold defining the not-yet-treated comparison pool for a
+// (g,t) pair.  Post-treatment pairs use the pool untreated through t + delta
+// (R_{g,t} in eq. 2.6 of Imai, Qin, and Yanagi).  Pre-treatment pairs
+// (t < g - delta) anchor the pool at t = g (R_{g,g} in the pre-treatment DR
+// estimand of their Appendix F), which keeps cohorts treated within the
+// pre-trend window out of the comparison pool.
+// -----------------------------------------------------------------------------
+real scalar didhetero_comp_threshold_ord(
+    real scalar g1,
+    real scalar t1,
+    real scalar anticipation,
+    real colvector t_vals)
+{
+    real scalar g_ord, t_ord
+
+    g_ord = didhetero_period_ord(g1, t_vals)
+    t_ord = didhetero_period_ord(t1, t_vals)
+
+    if (t_ord < g_ord - anticipation) {
+        return(g_ord + anticipation)
+    }
+    return(t_ord + anticipation)
+}
+
+// -----------------------------------------------------------------------------
 // didhetero_pair_in_domain()
 // Check whether a (g,t) pair is in the estimable domain when time labels are
 // interpreted through their ordinal positions in the observed support.
@@ -121,7 +147,14 @@ real scalar didhetero_pair_in_domain(
     t_ord = didhetero_period_ord(t1, t_vals)
 
     if (pretrend != 0) {
-        return(t_ord != g_ord - anticipation - 1)
+        if (t_ord == g_ord - anticipation - 1) return(0)
+        if (t_ord < g_ord - anticipation &
+            control_group == "notyettreated" & !has_never) {
+            gbar_ord = didhetero_period_ord(gbar, t_vals)
+            if (gbar_ord >= .) return(0)
+            return(gbar_ord > g_ord + anticipation)
+        }
+        return(1)
     }
 
     if (t_ord < g_ord - anticipation) {

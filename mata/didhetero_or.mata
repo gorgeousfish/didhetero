@@ -169,7 +169,9 @@ real matrix didhetero_or_estimate(struct DidHeteroData scalar data,
             t1 = gteval[j, 2]
             
             // Compute threshold for not-yet-treated condition
-            threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
+            // (anchored at t = g for pre-treatment pairs; see
+            // didhetero_comp_threshold_ord)
+            threshold_ord = didhetero_comp_threshold_ord(g1, t1, anticipation, data.t_vals)
             
             // Identify control units: never-treated or not-yet-treated
             subset_mask = (G :== 0) :| (G_ord :> threshold_ord)

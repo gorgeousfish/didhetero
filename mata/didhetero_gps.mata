@@ -383,7 +383,9 @@ real matrix didhetero_gps_estimate(struct DidHeteroData scalar data,
             t1 = gteval[j, 2]
             
             // Compute threshold period for not-yet-treated subset construction
-            threshold_ord = didhetero_period_ord(t1, data.t_vals) + anticipation
+            // (anchored at t = g for pre-treatment pairs; see
+            // didhetero_comp_threshold_ord)
+            threshold_ord = didhetero_comp_threshold_ord(g1, t1, anticipation, data.t_vals)
             
             // Subset: units in group g1, never-treated (G==0), or not-yet-treated
             // units whose treatment starts strictly after the threshold period.

@@ -49,6 +49,91 @@ mata:
 //   K x 1 vector of bandwidths
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// _didhetero_render_header()
+// Render the standard Stata estimation-table style header for catt_gt/didhetero.
+//
+// Display only: reads the external _dh_data struct (populated by
+// didhetero_init_from_ado + gteval build) plus a handful of Stata locals set
+// by the calling .ado. Must be called AFTER the (g,t) pairs are built (so
+// num_gteval is known) and BEFORE Stage 1 (so any GPS/UCB notes appear below
+// the header, matching the header -> notes -> table ordering).
+//
+// Layout (two columns): left column carries model information, right column
+// carries right-aligned summary statistics with '=' alignment.
+// -----------------------------------------------------------------------------
+void _didhetero_render_header()
+{
+    external struct DidHeteroData scalar _dh_data
+
+    string scalar cmdname, kernel_full, method_str, control_str, bw_disp
+    string scalar obs_str, gt_str, ez_str, inf_lab, inf_val, covar
+    string scalar bwsel, bw_local
+    string rowvector bwt
+    real scalar n, K, R, p, biters, bstrap_on, lev, antic
+
+    cmdname = st_local("_dh_cmdname")
+    if (cmdname == "") cmdname = "catt_gt"
+
+    n      = _dh_data.n
+    K      = _dh_data.num_gteval
+    R      = _dh_data.num_zeval
+    p      = _dh_data.porder
+    biters = _dh_data.biters
+    bstrap_on = (biters > 0)
+    lev    = round(100 * (1 - _dh_data.alp))
+    antic  = _dh_data.anticipation
+
+    if (_dh_data.kernel == "gau")      kernel_full = "Gaussian"
+    else if (_dh_data.kernel == "epa") kernel_full = "Epanechnikov"
+    else                               kernel_full = _dh_data.kernel
+
+    control_str = _dh_data.control_group
+    method_str  = sprintf("LPR (p=%g, %s kernel)", p, kernel_full)
+
+    // Bandwidth description
+    bwsel    = st_local("bwselect")
+    bw_local = st_local("bw")
+    if (bwsel == "manual") {
+        bwt = tokens(bw_local)
+        if (cols(bwt) == 1) bw_disp = sprintf("manual (h = %5.3f)", strtoreal(bwt[1]))
+        else                bw_disp = "manual (per-pair h)"
+    }
+    else {
+        bw_disp = sprintf("%s (data-driven)", bwsel)
+    }
+
+    // Right-column statistics
+    obs_str = strtrim(strofreal(n, "%21.0fc"))
+    gt_str  = sprintf("%g", K)
+    ez_str  = sprintf("%g", R)
+    if (bstrap_on) {
+        inf_lab = "Bootstrap"
+        inf_val = sprintf("%g", biters)
+    }
+    else {
+        inf_lab = "Inference"
+        inf_val = "Analytical"
+    }
+
+    printf("\n")
+    printf("{txt}%-48s %-13s = %10s\n",
+           cmdname + ": Doubly Robust CATT Estimation", "Number of obs", obs_str)
+    printf("{txt}%-48s %-13s = %10s\n",
+           "Method:  " + method_str, "(g,t) pairs", gt_str)
+    printf("{txt}%-48s %-13s = %10s\n",
+           "Control: " + control_str, "Eval points", ez_str)
+    printf("{txt}%-48s %-13s = %10s\n",
+           "Bandwidth: " + bw_disp, inf_lab, inf_val)
+
+    // Optional extra model-information lines
+    covar = st_local("xformula_display")
+    if (covar != "") printf("{txt}Covariates: %s\n", covar)
+    if (antic > 0)   printf("{txt}Anticipation: %g period(s)\n", antic)
+    if (strtoreal(st_local("pretrend")) == 1) printf("{txt}Pre-trend test: ON\n")
+    printf("\n")
+}
+
 real colvector didhetero_bw_preloop(
     struct DidHeteroData scalar data,
     real matrix gps_mat,
@@ -408,6 +493,15 @@ void didhetero_run_from_ado()
     }
 
     if (_dh_data.verbose) printf("{txt}  Found %g valid (g,t) pairs\n", _dh_data.num_gteval)
+
+    // =========================================================================
+    // Render estimation header (display only)
+    //
+    // Printed here — after the (g,t) pairs are known but before Stage 1 — so
+    // that any GPS/UCB diagnostic notes emitted during estimation appear below
+    // the header and above the results table.
+    // =========================================================================
+    _didhetero_render_header()
 
     // =========================================================================
     // Step 2: Initialize core estimation arrays

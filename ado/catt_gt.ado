@@ -282,33 +282,10 @@ program define catt_gt, eclass
     }
 
     local _dh_level = 100 * (1 - `alp')
-    di as text ""
-    di as text "catt_gt: Doubly Robust CATT Estimation"
-    // Line 2: core params
-    local _hdr_line2 "  n=`n_total' | p=`porder' | kernel=`kernel' | control=`control' | `_dh_level'% level"
-    if `anticip' > 0 {
-        local _hdr_line2 "`_hdr_line2' | anticip=`anticip'"
-    }
-    di as text "`_hdr_line2'"
-    // Line 3: inference method
-    if `bstrap' == 1 {
-        local _uni_label = cond(`uniform'==1, "global", "z-only")
-        di as text "  Bootstrap: `biters' iter (Mammen) | Uniform: `_uni_label'"
-    }
-    else {
-        di as text "  Inference: Analytical only"
-    }
-    // Line 4: bandwidth
-    if "`bw'" != "" {
-        di as text "  Bandwidth: manual (h=`bw')"
-    }
-    else {
-        di as text "  Bandwidth: `bwselect'"
-    }
-    if "`xformula_display'" != "" {
-        di as text "  Covariates: `xformula_display'"
-    }
-    di as text ""
+    // Header is rendered from Mata (_didhetero_render_header) during the
+    // estimation run, once the (g,t) pairs are known. Set the command name
+    // so the renderer can label the output correctly.
+    local _dh_cmdname "catt_gt"
 
     // Prepare Mata data structures and initialize kernel constants
 

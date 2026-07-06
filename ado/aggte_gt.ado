@@ -447,6 +447,12 @@ program define aggte_gt, eclass
     // -------------------------------------------------------------
     // Call Mata orchestrator
     // -------------------------------------------------------------
+
+    // Render the estimation-table header first, so any diagnostic notes
+    // emitted during the run appear below the header and above the table.
+    _didhetero_aggte_header "`type'" `_agg_base_N' `num_eval' `porder' ///
+        "`kernel'" "`_agg_base_control_group'" `_bstrap_flag' `biters'
+
     local _bw_matname ""
     if `_has_user_bw' == 1 local _bw_matname "`tmp_bw_user'"
 
@@ -466,13 +472,9 @@ program define aggte_gt, eclass
         `_agg_base_anticipation')
 
     // -------------------------------------------------------------
-    // Display results table
+    // (Results table is rendered at the end via _didhetero_aggte_display,
+    //  after e() is fully posted, so it can read e(Estimate).)
     // -------------------------------------------------------------
-    capture mata: _didhetero_aggte_display_table( ///
-        "`type'", `porder', "`kernel'",           ///
-        "`bwselect'", `alp',                      ///
-        `_bstrap_flag', `biters',                 ///
-        `_uniformall_flag')
 
     // -------------------------------------------------------------
     // Store results in e()
@@ -588,6 +590,171 @@ program define aggte_gt, eclass
     ereturn local type "`type'"
     ereturn local cmd "aggte_gt"
 
+    // -------------------------------------------------------------
+    // Render the standard Stata estimation-table of results
+    // -------------------------------------------------------------
+    _didhetero_aggte_display
+
+end
+
+program define _didhetero_aggte_header
+    version 16.0
+    args type n num_eval porder kernel control bstrap biters
+
+    // Capitalized aggregation-type label
+    local _typ = strproper("`type'")
+
+    // Kernel long name
+    local _kern "`kernel'"
+    if "`kernel'" == "gau" local _kern "Gaussian"
+    else if "`kernel'" == "epa" local _kern "Epanechnikov"
+
+    // Comma-formatted counts
+    local _obs : di %15.0fc `n'
+    local _obs = trim("`_obs'")
+    local _nev : di %15.0fc `num_eval'
+    local _nev = trim("`_nev'")
+
+    local _l1 "aggte_gt: `_typ' aggregation"
+    local _l2 "Method:  LPR (p=`porder', `_kern' kernel)"
+    local _l3 "Control: `control'"
+
+    if `bstrap' == 1 {
+        local _inflab "Bootstrap"
+        local _infval : di %15.0fc `biters'
+        local _infval = trim("`_infval'")
+    }
+    else {
+        local _inflab "Inference"
+        local _infval "Analytical"
+    }
+
+    di as text ""
+    di as text %-48s "`_l1'" " " %-13s "Number of obs" " = " %10s "`_obs'"
+    di as text %-48s "`_l2'" " " %-13s "Eval points"   " = " %10s "`_nev'"
+    di as text %-48s "`_l3'" " " %-13s "`_inflab'"      " = " %10s "`_infval'"
+end
+
+program define _didhetero_aggte_display
+    version 16.0
+
+    capture confirm matrix e(Estimate)
+    if _rc {
+        exit
+    }
+
+    local type "`e(aggte_type)'"
+    if "`type'" == "" local type "`e(type)'"
+    local has_bstrap = e(bstrap)
+    if "`has_bstrap'" == "" | `has_bstrap' == . local has_bstrap = 0
+    local uniform = e(uniformall)
+    if "`uniform'" == "" | `uniform' == . local uniform = 0
+    local level = e(level)
+    if "`level'" == "" | `level' == . local level = 95
+    local levdisp = strofreal(`level', "%9.0g")
+
+    tempname Est
+    matrix `Est' = e(Estimate)
+    local nrows = rowsof(`Est')
+    local is_simple = ("`type'" == "simple")
+
+    // Column indices depend on aggregation type (simple has no eval column)
+    if `is_simple' {
+        local _zc = 1
+        local _ec = 2
+        local _sc = 3
+        local _c1l = 4
+        local _c1u = 5
+        local _c2l = 6
+        local _c2u = 7
+        local _bwc = 8
+        local _dimlab ""
+    }
+    else {
+        local _evc = 1
+        local _zc = 2
+        local _ec = 3
+        local _sc = 4
+        local _c1l = 5
+        local _c1u = 6
+        local _c2l = 7
+        local _c2u = 8
+        local _bwc = 9
+        if "`type'" == "dynamic"       local _dimlab "e"
+        else if "`type'" == "group"    local _dimlab "g"
+        else if "`type'" == "calendar" local _dimlab "t"
+        else                             local _dimlab "eval"
+    }
+
+    // Number of eval points (for the uniform-CI label)
+    local num_eval = 1
+    tempname _evm
+    capture matrix `_evm' = e(aggte_eval)
+    if _rc == 0 local num_eval = rowsof(`_evm')
+
+    if `uniform' == 1 & `num_eval' > 1 {
+        local _ci_lab "[`levdisp'% Uniform CI]"
+    }
+    else {
+        local _ci_lab "[`levdisp'% CI]"
+    }
+
+    // Column-1 header
+    if `is_simple' {
+        local _c1hdr "z"
+    }
+    else {
+        local _c1hdr "`_dimlab'   z"
+    }
+
+    di as text "{hline 13}{c +}{hline 62}"
+    di as text %12s "`_c1hdr'" as text " {c |}" ///
+       as text %11s "Estimate" %11s "Std. err." "   " %-22s "`_ci_lab'" %10s "BW"
+    di as text "{hline 13}{c +}{hline 62}"
+
+    local _prev_eval "__none__"
+    forvalues i = 1/`nrows' {
+        // Group-label row for non-simple aggregation types
+        if `is_simple' == 0 {
+            local _ev = `Est'[`i', `_evc']
+            local _evdisp = strofreal(`_ev', "%9.0g")
+            if "`_evdisp'" != "`_prev_eval'" {
+                di as text %-12s "`_dimlab'=`_evdisp'" as text " {c |}"
+                local _prev_eval "`_evdisp'"
+            }
+        }
+
+        local z_val = `Est'[`i', `_zc']
+        local est   = `Est'[`i', `_ec']
+        local se    = `Est'[`i', `_sc']
+        local ci1_l = `Est'[`i', `_c1l']
+        local ci1_u = `Est'[`i', `_c1u']
+
+        if `has_bstrap' == 1 {
+            local ci2_l = `Est'[`i', `_c2l']
+            local ci2_u = `Est'[`i', `_c2u']
+            local ci_lo = cond(`ci2_l' != ., `ci2_l', `ci1_l')
+            local ci_hi = cond(`ci2_u' != ., `ci2_u', `ci1_u')
+        }
+        else {
+            local ci_lo = `ci1_l'
+            local ci_hi = `ci1_u'
+        }
+
+        local _b1 : di %9.4f `ci_lo'
+        local _b2 : di %9.4f `ci_hi'
+        local ci_str "[`_b1', `_b2']"
+
+        local _bw = `Est'[`i', `_bwc']
+
+        di as result %11.3f `z_val' as text "  {c |}" ///
+           as result %11.4f `est' %11.4f `se' ///
+           as text "   `ci_str'" ///
+           as result %10.4f `_bw'
+    }
+
+    di as text "{hline 13}{c +}{hline 62}"
+    di as text ""
 end
 
 program define _aggte_normalize_upstream_e, eclass

@@ -1822,8 +1822,9 @@ struct AggtResult scalar didhetero_aggte_main(
     h_agg_vec    = J(num_eval, 1, .)
     shortcircuit = J(num_eval, 1, 0)
 
-    printf("{txt}aggte_gt: %s aggregation (%g eval points)\n",
-           strupper(substr(type, 1, 1)) + substr(type, 2, .), num_eval)
+    // Header and results table are rendered from the .ado layer
+    // (aggte_gt.ado) so that aggte_gt matches the standard Stata
+    // estimation-table style used by catt_gt/didhetero.
 
     // Pre-generate bootstrap weights (shared across all eval points)
     if (bstrap) {
@@ -2423,23 +2424,6 @@ void _didhetero_aggte_ado_entry(
         kd0_Z, kd1_Z, Z_supp, gbar, n,
         c_hat_catt, c_check_catt, pass2_data, gps_mat, or_mat, 0)
 
-    // Compact summary line: Bootstrap + Bandwidth
-    {
-        real scalar _bw_display
-        string scalar _bw_str, _bstrap_info
-        // Use first non-missing bandwidth for summary
-        _bw_display = .
-        for (id_eval = 1; id_eval <= num_eval; id_eval++) {
-            if (R.aggte_bw[id_eval] < .) {
-                _bw_display = R.aggte_bw[id_eval]
-                break
-            }
-        }
-        _bw_str = (_bw_display < . ? sprintf("%7.4f", _bw_display) : ".")
-        _bstrap_info = (bstrap ? sprintf("%g iter", biters) : "off")
-        printf("{txt}  Bootstrap: %s | Bandwidth: %s\n", _bstrap_info, _bw_str)
-    }
-
     // Build combined results matrix.
     //
     // Schema follows Imai, Qin, and Yanagi (2025, Section 5):
@@ -2496,128 +2480,8 @@ void _didhetero_aggte_ado_entry(
 }
 
 
-// =============================================================================
-// _didhetero_aggte_display_table()
-//
-// Display formatted aggregation results table. Reads results from Stata matrices
-// __aggte_Estimate and prints a formatted table with evaluation points,
-// point estimates, standard errors, and confidence intervals.
-// =============================================================================
-void _didhetero_aggte_display_table(
-    string scalar type,
-    real scalar porder,
-    string scalar kernel,
-    string scalar bwselect,
-    real scalar alp,
-    real scalar bstrap,
-    real scalar biters,
-    real scalar uniformall)
-{
-    real matrix Est
-    real scalar nrows, r, is_simple
-    real scalar eval_val, z_val, est_val, se_val
-    real scalar ci1l, ci1u, ci2l, ci2u, bw_val
-    string scalar bstrap_str, uniform_str
-
-    Est = st_matrix("__aggte_Estimate")
-    nrows = rows(Est)
-    is_simple = (type == "simple")
-
-    bstrap_str  = (bstrap)     ? sprintf("%g iterations", biters) : "disabled"
-    uniform_str = (uniformall) ? "global" : "per-eval"
-
-    // Header
-    printf("\n")
-    printf("{txt}{hline 78}\n")
-    printf("{txt}Aggregated Treatment Effect Estimates (aggte_gt)\n")
-    printf("{txt}{hline 78}\n")
-    printf("{txt}  Type: {res}%s{txt} | Polynomial order: {res}%g{txt} | Kernel: {res}%s\n",
-           type, porder, kernel)
-    printf("{txt}  Bandwidth selection: {res}%s{txt} | Significance level: {res}%g\n",
-           bwselect, alp)
-    printf("{txt}  Bootstrap: {res}%s{txt} | Uniform band: {res}%s\n",
-           bstrap_str, uniform_str)
-    printf("{txt}{hline 78}\n")
-
-    // Column headers (simple has no eval column)
-    if (is_simple) {
-        printf("{txt}  %8s | %9s | %9s | %9s | %9s |",
-               "zeval", "est", "se", "ci1_lb", "ci1_ub")
-    }
-    else {
-        printf("{txt}  %8s | %8s | %9s | %9s | %9s | %9s |",
-               "eval", "zeval", "est", "se", "ci1_lb", "ci1_ub")
-    }
-    if (bstrap) {
-        printf(" %9s | %9s |", "ci2_lb", "ci2_ub")
-    }
-    printf(" %9s\n", "bw")
-
-    // Separator
-    if (is_simple) {
-        printf("{txt}  %s+%s+%s+%s+%s+",
-               "{hline 9}", "{hline 10}", "{hline 10}",
-               "{hline 10}", "{hline 10}")
-    }
-    else {
-        printf("{txt}  %s+%s+%s+%s+%s+%s+",
-               "{hline 9}", "{hline 9}", "{hline 10}", "{hline 10}",
-               "{hline 10}", "{hline 10}")
-    }
-    if (bstrap) {
-        printf("%s+%s+", "{hline 10}", "{hline 10}")
-    }
-    printf("%s\n", "{hline 10}")
-
-    // Data rows
-    for (r = 1; r <= nrows; r++) {
-        if (is_simple) {
-            z_val    = Est[r, 1]
-            est_val  = Est[r, 2]
-            se_val   = Est[r, 3]
-            ci1l     = Est[r, 4]
-            ci1u     = Est[r, 5]
-            ci2l     = Est[r, 6]
-            ci2u     = Est[r, 7]
-            bw_val   = Est[r, 8]
-
-            printf("{res}  %8.3f | %9.4f | %9.4f | %9.4f | %9.4f |",
-                   z_val, est_val, se_val, ci1l, ci1u)
-        }
-        else {
-            eval_val = Est[r, 1]
-            z_val    = Est[r, 2]
-            est_val  = Est[r, 3]
-            se_val   = Est[r, 4]
-            ci1l     = Est[r, 5]
-            ci1u     = Est[r, 6]
-            ci2l     = Est[r, 7]
-            ci2u     = Est[r, 8]
-            bw_val   = Est[r, 9]
-
-            printf("{res}  %8.3f | %8.3f | %9.4f | %9.4f | %9.4f | %9.4f |",
-                   eval_val, z_val, est_val, se_val, ci1l, ci1u)
-        }
-        if (bstrap) {
-            printf(" %9.4f | %9.4f |", ci2l, ci2u)
-        }
-        printf(" %9.4f\n", bw_val)
-    }
-
-    // Footer
-    printf("{txt}{hline 78}\n")
-    if (is_simple) {
-        printf("{txt}  %g z-eval points = %g rows (type=simple has no eval dimension)\n",
-               rows(st_matrix("__aggte_zeval")), nrows)
-    }
-    else {
-        printf("{txt}  %g eval points x %g z-eval points = %g rows\n",
-               rows(st_matrix("__aggte_eval")),
-               rows(st_matrix("__aggte_zeval")),
-               nrows)
-    }
-    printf("{txt}{hline 78}\n")
-}
+// (The aggregation results table is rendered from the .ado layer;
+//  see _didhetero_aggte_display in aggte_gt.ado.)
 
 
 end
